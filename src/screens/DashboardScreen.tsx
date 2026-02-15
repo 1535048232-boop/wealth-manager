@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { View, ScrollView, Text, StatusBar, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NetWorthCard, AssetChart, AssetCategoryCard } from '../components';
-import { getCategorySummaries, getNetWorthSummary } from '../data/mockData';
 import { AssetCategory } from '../types';
 import { colors } from '../styles/theme';
+import { useAssets } from '../context/AssetContext';
 
 export const DashboardScreen: React.FC = () => {
   const [expandedCategory, setExpandedCategory] = useState<AssetCategory | null>(null);
+  const { getCategorySummaries, getNetWorthSummary } = useAssets();
   
   const categories = getCategorySummaries();
   const netWorthSummary = getNetWorthSummary();

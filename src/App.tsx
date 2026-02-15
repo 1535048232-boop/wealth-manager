@@ -1,16 +1,18 @@
 import React from 'react';
 import { View, Pressable, Text, StyleSheet } from 'react-native';
-import { DashboardScreen, ReconcileScreen } from './screens';
+import { DashboardScreen, ReconcileScreen, StatisticsScreen } from './screens';
 import { colors } from './styles/theme';
+import { AssetProvider } from './context/AssetContext';
 
-type TabType = 'dashboard' | 'reconcile';
+type TabType = 'dashboard' | 'statistics' | 'reconcile';
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<TabType>('dashboard');
 
   return (
     <View style={styles.container}>
       {activeTab === 'dashboard' && <DashboardScreen />}
+      {activeTab === 'statistics' && <StatisticsScreen />}
       {activeTab === 'reconcile' && <ReconcileScreen />}
       
       <View style={styles.tabBar}>
@@ -23,6 +25,18 @@ export const App: React.FC = () => {
           </Text>
           <Text style={[styles.tabLabel, activeTab === 'dashboard' && styles.tabLabelActive]}>
             总览
+          </Text>
+        </Pressable>
+        
+        <Pressable
+          onPress={() => setActiveTab('statistics')}
+          style={styles.tabItem}
+        >
+          <Text style={[styles.tabIcon, activeTab !== 'statistics' && styles.tabIconInactive]}>
+            📈
+          </Text>
+          <Text style={[styles.tabLabel, activeTab === 'statistics' && styles.tabLabelActive]}>
+            统计
           </Text>
         </Pressable>
         
@@ -42,6 +56,14 @@ export const App: React.FC = () => {
   );
 };
 
+export const App: React.FC = () => {
+  return (
+    <AssetProvider>
+      <AppContent />
+    </AssetProvider>
+  );
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -55,7 +77,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingBottom: 32,
     paddingTop: 12,
     flexDirection: 'row',
@@ -63,6 +85,7 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     alignItems: 'center',
+    paddingHorizontal: 16,
   },
   tabIcon: {
     fontSize: 24,

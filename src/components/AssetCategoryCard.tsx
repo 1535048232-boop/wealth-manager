@@ -16,6 +16,9 @@ export const AssetCategoryCard: React.FC<AssetCategoryCardProps> = ({
   onToggle,
 }) => {
   const isLiability = category.category === 'liability';
+  const totalAssets = category.accounts
+    .filter(acc => acc.type === 'asset')
+    .reduce((sum, acc) => sum + Math.abs(acc.balance), 0);
 
   return (
     <View style={styles.container}>
@@ -44,6 +47,11 @@ export const AssetCategoryCard: React.FC<AssetCategoryCardProps> = ({
               {isLiability ? '-' : ''}
               {formatCurrency(Math.abs(category.total))}
             </Text>
+            {!isLiability && (
+              <Text style={styles.percentage}>
+                占比 {category.percentage.toFixed(1)}%
+              </Text>
+            )}
             <Text style={styles.expandText}>{isExpanded ? '收起' : '展开'}</Text>
           </View>
         </View>
@@ -51,22 +59,47 @@ export const AssetCategoryCard: React.FC<AssetCategoryCardProps> = ({
 
       {isExpanded && (
         <View style={styles.expandedContainer}>
-          {category.accounts.map((account) => (
-            <View key={account.id} style={styles.accountRow}>
-              <View style={styles.accountLeft}>
-                <Text style={styles.accountIcon}>{account.icon}</Text>
-                <Text style={styles.accountName}>{account.name}</Text>
+          {category.accounts.map((account) => {
+            const balanceDiff = account.balance - account.previousBalance;
+            const hasIncreased = balanceDiff > 0;
+            const accountPercentage = totalAssets > 0 
+              ? (Math.abs(account.balance) / totalAssets) * 100 
+              : 0;
+            
+            return (
+              <View key={account.id} style={styles.accountRow}>
+                <View style={styles.accountLeft}>
+                  <Text style={styles.accountIcon}>{account.icon}</Text>
+                  <View style={styles.accountInfo}>
+                    <Text style={styles.accountName}>{account.name}</Text>
+                    <View style={styles.accountMeta}>
+                      {balanceDiff !== 0 && (
+                        <Text style={[
+                          styles.changeText,
+                          { color: (account.type === 'liability' ? !hasIncreased : hasIncreased) ? colors.success : colors.danger }
+                        ]}>
+                          {hasIncreased ? '+' : ''}{formatCurrency(balanceDiff)}
+                        </Text>
+                      )}
+                      {!isLiability && (
+                        <Text style={styles.accountPercentage}>
+                          {accountPercentage.toFixed(1)}%
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+                <Text
+                  style={[
+                    styles.accountBalance,
+                    { color: account.balance >= 0 ? colors.primary : colors.danger },
+                  ]}
+                >
+                  {formatCurrency(account.balance)}
+                </Text>
               </View>
-              <Text
-                style={[
-                  styles.accountBalance,
-                  { color: account.balance >= 0 ? colors.primary : colors.danger },
-                ]}
-              >
-                {formatCurrency(account.balance)}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
     </View>
@@ -130,6 +163,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+  percentage: {
+    fontSize: 11,
+    color: colors.secondary,
+    marginTop: 2,
+  },
   expandText: {
     fontSize: 12,
     color: colors.secondary,
@@ -159,9 +197,26 @@ const styles = StyleSheet.create({
     fontSize: 20,
     marginRight: 8,
   },
+  accountInfo: {
+    flex: 1,
+  },
   accountName: {
     color: colors.primary,
     fontSize: 14,
+  },
+  accountMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  changeText: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  accountPercentage: {
+    fontSize: 11,
+    color: colors.muted,
   },
   accountBalance: {
     fontSize: 14,

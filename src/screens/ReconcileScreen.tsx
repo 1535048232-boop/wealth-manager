@@ -1,24 +1,59 @@
-import React, { useState } from 'react';
-import { View, ScrollView, Text, Pressable, TextInput, StyleSheet } from 'react-native';
+import React, { useRef, useCallback } from 'react';
+import { View, ScrollView, Text, TextInput, StyleSheet, findNodeHandle, TextInputProps } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getAllAccounts } from '../data/mockData';
+import { useAssets } from '../context/AssetContext';
 import { Account } from '../types';
 import { formatFullCurrency } from '../utils/format';
 import { colors } from '../styles/theme';
 
 interface AccountReconcileItemProps {
   account: Account;
-  value: string;
-  onValueChange: (value: string) => void;
+  index: number;
+  totalCount: number;
+  inputRefs: React.MutableRefObject<(TextInput | null)[]>;
+  onFocusNext: (currentIndex: number) => void;
 }
 
 const AccountReconcileItem: React.FC<AccountReconcileItemProps> = ({
   account,
-  value,
-  onValueChange,
+  index,
+  totalCount,
+  inputRefs,
+  onFocusNext,
 }) => {
+  const { updateAccountBalance } = useAssets();
+  const [inputValue, setInputValue] = React.useState(account.balance.toString());
+  const [isEditing, setIsEditing] = React.useState(false);
+
   const isLiability = account.type === 'liability';
-  const isDifferent = value !== account.balance.toString();
+  const balanceDiff = account.balance - account.previousBalance;
+  const hasIncreased = balanceDiff > 0;
+  const hasDecreased = balanceDiff < 0;
+
+  const handleEndEditing = useCallback(() => {
+    setIsEditing(false);
+    const numericValue = parseFloat(inputValue) || 0;
+    const finalValue = isLiability ? -Math.abs(numericValue) : Math.abs(numericValue);
+    updateAccountBalance(account.id, finalValue);
+  }, [inputValue, account.id, isLiability, updateAccountBalance]);
+
+  const handleSubmitEditing = useCallback(() => {
+    handleEndEditing();
+    onFocusNext(index);
+  }, [handleEndEditing, onFocusNext, index]);
+
+  const getChangeColor = () => {
+    if (isLiability) {
+      return hasIncreased ? colors.success : colors.danger;
+    }
+    return hasIncreased ? colors.success : colors.danger;
+  };
+
+  const getChangeText = () => {
+    if (balanceDiff === 0) return null;
+    const sign = balanceDiff > 0 ? '+' : '';
+    return `${sign}${formatFullCurrency(balanceDiff)}`;
+  };
 
   return (
     <View style={styles.accountRow}>
@@ -26,23 +61,48 @@ const AccountReconcileItem: React.FC<AccountReconcileItemProps> = ({
         <Text style={styles.accountIcon}>{account.icon}</Text>
         <View style={styles.accountInfo}>
           <Text style={styles.accountName}>{account.name}</Text>
-          <Text style={styles.accountBalance}>
-            账面余额: {formatFullCurrency(account.balance)}
-          </Text>
+          <View style={styles.balanceRow}>
+            <Text style={styles.previousBalance}>
+              上期: {formatFullCurrency(account.previousBalance)}
+            </Text>
+            {balanceDiff !== 0 && (
+              <Text style={[styles.changeText, { color: getChangeColor() }]}>
+                {getChangeText()}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
       <View style={styles.inputContainer}>
         <Text style={[styles.currencySymbol, { color: isLiability ? colors.danger : colors.primary }]}>
           ¥
         </Text>
-        <View style={[styles.inputWrapper, isDifferent && styles.inputWrapperChanged]}>
+        <View
+          style={[
+            styles.inputWrapper,
+            isEditing && styles.inputWrapperFocused,
+            hasIncreased && !isLiability && styles.inputWrapperIncreased,
+            hasDecreased && !isLiability && styles.inputWrapperDecreased,
+            hasIncreased && isLiability && styles.inputWrapperIncreased,
+            hasDecreased && isLiability && styles.inputWrapperDecreased,
+          ]}
+        >
           <TextInput
-            value={value}
-            onChangeText={onValueChange}
+            ref={(ref) => { inputRefs.current[index] = ref; }}
+            value={inputValue}
+            onChangeText={setInputValue}
+            onFocus={() => setIsEditing(true)}
+            onBlur={handleEndEditing}
+            onSubmitEditing={handleSubmitEditing}
             keyboardType="decimal-pad"
+            returnKeyType={index === totalCount - 1 ? 'done' : 'next'}
             placeholder="0.00"
             placeholderTextColor="#9CA3AF"
-            style={[styles.input, { color: isLiability ? colors.danger : colors.primary }]}
+            selectTextOnFocus
+            style={[
+              styles.input,
+              { color: isLiability ? colors.danger : colors.primary },
+            ]}
           />
         </View>
       </View>
@@ -51,24 +111,28 @@ const AccountReconcileItem: React.FC<AccountReconcileItemProps> = ({
 };
 
 export const ReconcileScreen: React.FC = () => {
-  const accounts = getAllAccounts();
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    accounts.forEach(acc => {
-      initial[acc.id] = acc.balance.toString();
-    });
-    return initial;
-  });
-
-  const handleValueChange = (accountId: string, value: string) => {
-    setValues(prev => ({
-      ...prev,
-      [accountId]: value,
-    }));
-  };
+  const { accounts } = useAssets();
+  const inputRefs = useRef<(TextInput | null)[]>([]);
 
   const assetAccounts = accounts.filter(acc => acc.type === 'asset');
   const liabilityAccounts = accounts.filter(acc => acc.type === 'liability');
+  const allAccounts = [...assetAccounts, ...liabilityAccounts];
+
+  const handleFocusNext = useCallback((currentIndex: number) => {
+    if (currentIndex < allAccounts.length - 1) {
+      const nextInput = inputRefs.current[currentIndex + 1];
+      if (nextInput) {
+        nextInput.focus();
+      }
+    }
+  }, [allAccounts.length]);
+
+  const getAccountIndex = (account: Account, isAsset: boolean) => {
+    if (isAsset) {
+      return assetAccounts.findIndex(a => a.id === account.id);
+    }
+    return assetAccounts.length + liabilityAccounts.findIndex(a => a.id === account.id);
+  };
 
   return (
     <View style={styles.container}>
@@ -77,7 +141,7 @@ export const ReconcileScreen: React.FC = () => {
           <Text style={styles.headerSubtitle}>家庭资产看板</Text>
           <Text style={styles.headerTitle}>一键对账</Text>
           <Text style={styles.headerDesc}>
-            快速核对各账户余额，确保账目准确
+            修改余额后自动保存，点击"下一项"快速跳转
           </Text>
         </View>
 
@@ -85,6 +149,8 @@ export const ReconcileScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -96,8 +162,10 @@ export const ReconcileScreen: React.FC = () => {
                 <AccountReconcileItem
                   key={account.id}
                   account={account}
-                  value={values[account.id]}
-                  onValueChange={(value) => handleValueChange(account.id, value)}
+                  index={getAccountIndex(account, true)}
+                  totalCount={allAccounts.length}
+                  inputRefs={inputRefs}
+                  onFocusNext={handleFocusNext}
                 />
               ))}
             </View>
@@ -113,17 +181,19 @@ export const ReconcileScreen: React.FC = () => {
                 <AccountReconcileItem
                   key={account.id}
                   account={account}
-                  value={values[account.id]}
-                  onValueChange={(value) => handleValueChange(account.id, value)}
+                  index={getAccountIndex(account, false)}
+                  totalCount={allAccounts.length}
+                  inputRefs={inputRefs}
+                  onFocusNext={handleFocusNext}
                 />
               ))}
             </View>
           </View>
 
-          <View style={styles.buttonContainer}>
-            <Pressable style={styles.saveButton}>
-              <Text style={styles.saveButtonText}>保存对账结果</Text>
-            </Pressable>
+          <View style={styles.tipContainer}>
+            <Text style={styles.tipText}>
+              💡 提示: 输入完成后点击键盘"下一项"可快速跳转
+            </Text>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -221,10 +291,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  accountBalance: {
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  previousBalance: {
     color: colors.secondary,
     fontSize: 12,
-    marginTop: 2,
+  },
+  changeText: {
+    fontSize: 12,
+    marginLeft: 8,
+    fontWeight: '500',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -240,28 +319,36 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     minWidth: 100,
     backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  inputWrapperChanged: {
-    backgroundColor: 'rgba(26, 31, 54, 0.05)',
+  inputWrapperFocused: {
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+  },
+  inputWrapperIncreased: {
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+    borderColor: colors.success,
+  },
+  inputWrapperDecreased: {
+    backgroundColor: 'rgba(248, 113, 113, 0.1)',
+    borderColor: colors.danger,
   },
   input: {
     textAlign: 'right',
     fontSize: 16,
     fontWeight: '500',
+    minWidth: 80,
   },
-  buttonContainer: {
+  tipContainer: {
     marginTop: 24,
+    padding: 16,
+    backgroundColor: 'rgba(26, 31, 54, 0.05)',
+    borderRadius: 12,
   },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '600',
+  tipText: {
+    color: colors.secondary,
+    fontSize: 13,
+    textAlign: 'center',
   },
 });
