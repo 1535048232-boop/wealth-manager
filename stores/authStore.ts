@@ -1,6 +1,6 @@
-import { create } from 'zustand';
-import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { create } from "zustand";
+import { Session, User } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
 interface AuthState {
   session: Session | null;
@@ -11,8 +11,14 @@ interface AuthState {
   pendingEmailConfirmation: boolean;
 
   initialize: () => Promise<void>;
-  signInWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUpWithEmail: (email: string, password: string) => Promise<{ error: Error | null; needsConfirmation: boolean }>;
+  signInWithEmail: (
+    email: string,
+    password: string,
+  ) => Promise<{ error: Error | null }>;
+  signUpWithEmail: (
+    email: string,
+    password: string,
+  ) => Promise<{ error: Error | null; needsConfirmation: boolean }>;
   resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   setSession: (session: Session | null) => void;
@@ -27,8 +33,15 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   initialize: async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      set({ session, user: session?.user ?? null, isLoading: false, initialized: true });
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      set({
+        session,
+        user: session?.user ?? null,
+        isLoading: false,
+        initialized: true,
+      });
 
       // Listen for auth state changes (login, logout, token refresh, etc.)
       supabase.auth.onAuthStateChange((_event, session) => {
@@ -41,7 +54,10 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signInWithEmail: async (email: string, password: string) => {
     set({ isLoading: true });
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
     if (!error && data.session) {
       set({ session: data.session, user: data.session.user, isLoading: false });
     } else {
@@ -62,7 +78,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     // When confirmation is required, session is null but user.identities is not empty.
     const needsConfirmation = !data.session && !!data.user;
     if (data.session) {
-      set({ session: data.session, user: data.session.user, isLoading: false, pendingEmailConfirmation: false });
+      set({
+        session: data.session,
+        user: data.session.user,
+        isLoading: false,
+        pendingEmailConfirmation: false,
+      });
     } else {
       set({ isLoading: false, pendingEmailConfirmation: needsConfirmation });
     }
@@ -70,7 +91,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   resendConfirmationEmail: async (email: string) => {
-    const { error } = await supabase.auth.resend({ type: 'signup', email });
+    const { error } = await supabase.auth.resend({ type: "signup", email });
     return { error };
   },
 
