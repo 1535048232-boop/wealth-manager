@@ -5,3 +5,4 @@ export { Loading } from "./Loading";
 export { Avatar } from "./Avatar";
 export { Toast } from "./Toast";
 export { FamilySettingsModal } from "./FamilySettingsModal";
+export { AddAssetAccountModal } from "./AddAssetAccountModal";

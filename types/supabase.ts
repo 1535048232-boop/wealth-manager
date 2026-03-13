@@ -101,6 +101,79 @@ export interface Database {
         };
         Relationships: [];
       };
+      asset_accounts: {
+        Row: {
+          id: number;
+          member_id: number;
+          account_type:
+            | "银行卡"
+            | "支付宝"
+            | "微信"
+            | "公积金"
+            | "股票"
+            | "期权"
+            | "现金"
+            | "保险"
+            | "基金"
+            | "其他";
+          account_name: string;
+          asset_quadrant: "A类保值" | "B类消费" | "C类投资" | "D类保障" | null;
+          description: string | null;
+          institution: string | null;
+          status: 0 | 1;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          member_id: number;
+          account_type:
+            | "银行卡"
+            | "支付宝"
+            | "微信"
+            | "公积金"
+            | "股票"
+            | "期权"
+            | "现金"
+            | "保险"
+            | "基金"
+            | "其他";
+          account_name: string;
+          asset_quadrant?: "A类保值" | "B类消费" | "C类投资" | "D类保障" | null;
+          description?: string | null;
+          institution?: string | null;
+          status?: 0 | 1;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          member_id?: number;
+          account_type?:
+            | "银行卡"
+            | "支付宝"
+            | "微信"
+            | "公积金"
+            | "股票"
+            | "期权"
+            | "现金"
+            | "保险"
+            | "基金"
+            | "其他";
+          account_name?: string;
+          asset_quadrant?: "A类保值" | "B类消费" | "C类投资" | "D类保障" | null;
+          description?: string | null;
+          institution?: string | null;
+          status?: 0 | 1;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "asset_accounts_member_id_fkey";
+            columns: ["member_id"];
+            referencedRelation: "family_members";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

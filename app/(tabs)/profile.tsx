@@ -6,10 +6,12 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
-import { FamilySettingsModal } from '@/components/ui/FamilySettingsModal';
+import { FamilySettingsModal, FamilyDetail } from '@/components/ui/FamilySettingsModal';
+import { AddAssetAccountModal } from '@/components/ui/AddAssetAccountModal';
+import { AssetAccountListModal } from '@/components/ui/AssetAccountListModal';
 
 type Profile = { display_name: string | null; avatar_url: string | null };
-type Family = { id: number; family_name: string };
+type Family = FamilyDetail;
 
 // ─── Reusable row components ────────────────────────────────────────────────
 
@@ -96,6 +98,52 @@ export default function ProfileScreen() {
   const [repaymentReminder, setRepaymentReminder] = useState(true);
   const [monthlyReport, setMonthlyReport] = useState(true);
   const [showCreateFamily, setShowCreateFamily] = useState(false);
+  const [familyModalMode, setFamilyModalMode] = useState<'create' | 'view'>('create');
+  const [showAddAsset, setShowAddAsset] = useState(false);
+  const [showAssetList, setShowAssetList] = useState(false);
+
+  async function loadFamily() {
+    if (!user) return;
+
+    // Step 1: find the member row by profile_id
+    const { data: memberData } = await supabase
+      .from('family_members')
+      .select('family_id')
+      .eq('profile_id', user.id)
+      .eq('status', 1)
+      .maybeSingle();
+
+    if (!memberData?.family_id) {
+      setFamily(null);
+      return;
+    }
+
+    // Step 2: fetch full family details by family_id
+    const { data: familyData } = await supabase
+      .from('families')
+      .select('id, family_name, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+      .eq('id', memberData.family_id)
+      .maybeSingle();
+
+    const f = familyData as {
+      id: number;
+      family_name: string;
+      currency: string;
+      debt_warning_threshold: number;
+      repayment_reminder_switch: 0 | 1;
+      data_export_switch: 0 | 1;
+    } | null;
+
+    if (f) setFamily({
+      id: f.id,
+      family_name: f.family_name,
+      currency: f.currency,
+      debt_warning_threshold: Number(f.debt_warning_threshold),
+      repayment_reminder_switch: f.repayment_reminder_switch,
+      data_export_switch: f.data_export_switch,
+    });
+    else setFamily(null);
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -105,17 +153,7 @@ export default function ProfileScreen() {
       .eq('id', user.id)
       .single()
       .then(({ data }) => { if (data) setProfile(data); });
-    supabase
-      .from('family_members')
-      .select('families(id, family_name)')
-      .eq('user_id', user.id)
-      .eq('status', 1)
-      .limit(1)
-      .maybeSingle()
-      .then(({ data }) => {
-        const f = (data as any)?.families;
-        if (f) setFamily({ id: f.id, family_name: f.family_name });
-      });
+    loadFamily();
   }, [user?.id]);
 
   const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? '用户';
@@ -165,13 +203,24 @@ export default function ProfileScreen() {
         <SectionHeader title="家庭管理" />
         <RowCard>
           <SettingRow
-            label={family ? family.family_name : '创建家庭'}
-            sublabel={family ? '我的家庭' : undefined}
-            onPress={() => setShowCreateFamily(true)}
+            label={family ? '家庭设置' : '创建家庭'}
+            sublabel={family ? family.family_name : undefined}
+            onPress={() => {
+              setFamilyModalMode(family ? 'view' : 'create');
+              setShowCreateFamily(true);
+            }}
           />
           <SettingRow
             label="家庭成员"
             onPress={() => {}}
+          />
+          <SettingRow
+            label="添加资产账户"
+            onPress={() => setShowAddAsset(true)}
+          />
+          <SettingRow
+            label="我的资产账户"
+            onPress={() => setShowAssetList(true)}
             last
           />
         </RowCard>
@@ -231,7 +280,17 @@ export default function ProfileScreen() {
       <FamilySettingsModal
         visible={showCreateFamily}
         onClose={() => setShowCreateFamily(false)}
-        onSuccess={() => setShowCreateFamily(false)}
+        onSuccess={() => { setShowCreateFamily(false); loadFamily(); }}
+        mode={familyModalMode}
+        initialData={family ?? undefined}
+      />
+      <AddAssetAccountModal
+        visible={showAddAsset}
+        onClose={() => setShowAddAsset(false)}
+      />
+      <AssetAccountListModal
+        visible={showAssetList}
+        onClose={() => setShowAssetList(false)}
       />
     </ScreenWrapper>
   );

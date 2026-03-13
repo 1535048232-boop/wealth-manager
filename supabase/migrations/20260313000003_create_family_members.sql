@@ -1,7 +1,5 @@
 -- ============================================================
 -- Migration: Create family_members table
--- After this table is created we also patch families.creator_id
--- with the proper FK constraint.
 -- ============================================================
 
 -- 1. Create enum-like CHECK types for role / join_source
@@ -46,18 +44,12 @@ COMMENT ON COLUMN public.family_members.status                IS '状态：1=正
 ALTER TABLE public.family_members ENABLE ROW LEVEL SECURITY;
 
 -- 3. RLS Policies
---    Members can see all members in their own family
+--    Members can see their own rows (avoids infinite recursion)
 CREATE POLICY "family_members: select own family"
   ON public.family_members
   FOR SELECT
   TO authenticated
-  USING (
-    family_id IN (
-      SELECT family_id FROM public.family_members AS fm
-       WHERE fm.user_id = auth.uid()
-         AND fm.status = 1
-    )
-  );
+  USING (user_id = auth.uid());
 
 --    Only admin of the family can insert new members
 CREATE POLICY "family_members: insert by admin"

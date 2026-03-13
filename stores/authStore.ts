@@ -60,6 +60,23 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
     if (!error && data.session) {
       set({ session: data.session, user: data.session.user, isLoading: false });
+
+      // Ensure a profile row exists for this user (handles cases where the
+      // signup trigger may not have fired, e.g. legacy accounts).
+      const userId = data.session.user.id;
+      const { data: existing } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from("profiles").insert({
+          id: userId,
+          email: data.session.user.email ?? email,
+          display_name: (data.session.user.email ?? email).split("@")[0],
+        });
+      }
     } else {
       set({ isLoading: false });
     }

@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -23,23 +23,57 @@ const CURRENCIES = [
   { label: '港元（HKD）', value: 'HKD' },
 ];
 
+export interface FamilyDetail {
+  id: number;
+  family_name: string;
+  currency: string;
+  debt_warning_threshold: number;
+  repayment_reminder_switch: 0 | 1;
+  data_export_switch: 0 | 1;
+}
+
 interface Props {
   visible: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  mode?: 'create' | 'view';
+  initialData?: FamilyDetail;
 }
 
-export function FamilySettingsModal({ visible, onClose, onSuccess }: Props) {
+export function FamilySettingsModal({
+  visible,
+  onClose,
+  onSuccess,
+  mode = 'create',
+  initialData,
+}: Props) {
   const { user } = useAuthStore();
 
   const [familyName, setFamilyName] = useState('我的家庭');
   const [currency, setCurrency] = useState('CNY');
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
-  // DB column is NUMERIC(5,2), stores debt-ratio percentage (0–100%)
   const [debtThreshold, setDebtThreshold] = useState(20);
   const [repaymentReminder, setRepaymentReminder] = useState(true);
   const [dataExport, setDataExport] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Sync form state when modal opens in view mode
+  useEffect(() => {
+    if (visible && mode === 'view' && initialData) {
+      setFamilyName(initialData.family_name);
+      setCurrency(initialData.currency);
+      setDebtThreshold(Number(initialData.debt_warning_threshold));
+      setRepaymentReminder(initialData.repayment_reminder_switch === 1);
+      setDataExport(initialData.data_export_switch === 1);
+    }
+    if (visible && mode === 'create') {
+      setFamilyName('我的家庭');
+      setCurrency('CNY');
+      setDebtThreshold(20);
+      setRepaymentReminder(true);
+      setDataExport(false);
+    }
+  }, [visible, mode, initialData]);
 
   const selectedCurrencyLabel =
     CURRENCIES.find((c) => c.value === currency)?.label ?? currency;
@@ -53,17 +87,32 @@ export function FamilySettingsModal({ visible, onClose, onSuccess }: Props) {
 
     setSaving(true);
     try {
-      const { error } = await supabase.from('families').insert({
-        family_name: familyName.trim(),
-        creator_id: user.id,
-        currency,
-        debt_warning_threshold: debtThreshold,
-        repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
-        data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
-      });
+      let error;
+      if (mode === 'create') {
+        ({ error } = await supabase.from('families').insert({
+          family_name: familyName.trim(),
+          creator_id: user.id,
+          currency,
+          debt_warning_threshold: debtThreshold,
+          repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
+          data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
+        }));
+      } else {
+        ({ error } = await supabase.from('families').update({
+          family_name: familyName.trim(),
+          currency,
+          debt_warning_threshold: debtThreshold,
+          repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
+          data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
+        }).eq('id', initialData!.id));
+      }
 
       if (error) {
-        Alert.alert('保存失败', error.message);
+        const msg =
+          error.code === '23505'
+            ? '您已创建过家庭，每个账号只能创建一个家庭。'
+            : error.message;
+        Alert.alert('保存失败', msg);
         return;
       }
 
@@ -104,7 +153,7 @@ export function FamilySettingsModal({ visible, onClose, onSuccess }: Props) {
 
             {/* Title */}
             <Text className="text-center text-base font-semibold text-gray-800 py-3">
-              创建家庭
+              {mode === 'view' ? '家庭设置' : '创建家庭'}
             </Text>
 
             <ScrollView
