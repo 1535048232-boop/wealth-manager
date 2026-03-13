@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "command": "echo 'Reminder: Use NativeWind className, not StyleSheet.create'"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash(npm install*)",
+        "command": "echo 'Check: Is this dependency compatible with Expo managed workflow?'"
+      }
+    ],
+    "Stop": [
+      {
+        "command": "echo 'Done. Test on both iOS and Android before committing.'"
+      }
+    ]
+  }
+}
