@@ -1,12 +1,12 @@
 import { View, Text } from 'react-native';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 
-export default function ExploreScreen() {
+export default function EntryScreen() {
   return (
     <ScreenWrapper>
       <View className="flex-1 items-center justify-center px-6">
-        <Text className="text-2xl font-bold text-gray-900 mb-2">探索</Text>
-        <Text className="text-gray-500">发现更多内容</Text>
+        <Text className="text-ink text-2xl font-bold mb-2">录入</Text>
+        <Text className="text-ink-secondary text-sm">记录资产与交易</Text>
       </View>
     </ScreenWrapper>
   );

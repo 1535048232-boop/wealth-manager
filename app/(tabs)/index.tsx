@@ -1,15 +1,13 @@
 import { View, Text } from 'react-native';
-import { useAuthStore } from '@/stores/authStore';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
+import { Colors } from '@/constants/Colors';
 
 export default function HomeScreen() {
-  const { user } = useAuthStore();
-
   return (
-    <ScreenWrapper>
-      <View className="flex-1 items-center justify-center px-6">
-        <Text className="text-2xl font-bold text-gray-900 mb-2">Welcome</Text>
-        <Text className="text-gray-500">{user?.email}</Text>
+    <ScreenWrapper className="bg-app-bg">
+      <View className="flex-1 px-5 pt-4">
+        <Text className="text-ink text-2xl font-bold">家庭资产</Text>
+        <Text className="text-ink-secondary text-sm mt-1">总览</Text>
       </View>
     </ScreenWrapper>
   );
