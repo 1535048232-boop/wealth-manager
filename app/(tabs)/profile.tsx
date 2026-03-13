@@ -1,6 +1,8 @@
-import { View, Text, ScrollView, TouchableOpacity, Switch, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Switch, Platform, Modal, ActivityIndicator } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
+import { useAppStore } from '@/stores/appStore';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Avatar } from '@/components/ui/Avatar';
 import { Colors } from '@/constants/Colors';
@@ -9,9 +11,18 @@ import { useEffect, useState } from 'react';
 import { FamilySettingsModal, FamilyDetail } from '@/components/ui/FamilySettingsModal';
 import { AddAssetAccountModal } from '@/components/ui/AddAssetAccountModal';
 import { AssetAccountListModal } from '@/components/ui/AssetAccountListModal';
+import { ProfileEditModal } from '../../components/ui/ProfileEditModal';
 
 type Profile = { display_name: string | null; avatar_url: string | null };
 type Family = FamilyDetail;
+type FamilyMember = {
+  id: number;
+  displayName: string;
+  avatarUrl: string | null;
+  role: 'admin' | 'member' | 'guest';
+  joinSource: 'creator' | 'invite';
+  status: 1 | 0 | -1;
+};
 
 // ─── Reusable row components ────────────────────────────────────────────────
 
@@ -90,6 +101,7 @@ function ToggleRow({ label, sublabel, value, onChange, last = false }: {
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuthStore();
+  const profileVersion = useAppStore((state) => state.profileVersion);
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -101,6 +113,10 @@ export default function ProfileScreen() {
   const [familyModalMode, setFamilyModalMode] = useState<'create' | 'view'>('create');
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAssetList, setShowAssetList] = useState(false);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [familyMembersLoading, setFamilyMembersLoading] = useState(false);
+  const [showFamilyMembers, setShowFamilyMembers] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   async function loadFamily() {
     if (!user) return;
@@ -115,6 +131,7 @@ export default function ProfileScreen() {
 
     if (!memberData?.family_id) {
       setFamily(null);
+      setFamilyMembers([]);
       return;
     }
 
@@ -143,6 +160,36 @@ export default function ProfileScreen() {
       data_export_switch: f.data_export_switch,
     });
     else setFamily(null);
+
+    // Step 3: fetch active family members for UI preview/list
+    setFamilyMembersLoading(true);
+    try {
+      const { data: membersData } = await supabase
+        .from('family_members')
+        .select('id, role, join_source, status, profiles:profile_id(display_name, avatar_url)')
+        .eq('family_id', memberData.family_id)
+        .in('status', [1, -1])
+        .order('id', { ascending: true });
+
+      const members = (membersData ?? []).map((row: any) => {
+        const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+        return {
+          id: row.id as number,
+          displayName: profile?.display_name ?? `成员${row.id}`,
+          avatarUrl: profile?.avatar_url ?? null,
+          role: (row.role ?? 'member') as 'admin' | 'member' | 'guest',
+          joinSource: (row.join_source ?? 'invite') as 'creator' | 'invite',
+          status: (row.status ?? 1) as 1 | 0 | -1,
+        } satisfies FamilyMember;
+      }).sort((a, b) => {
+        const roleOrder = { admin: 0, member: 1, guest: 2 } as const;
+        return roleOrder[a.role] - roleOrder[b.role] || a.id - b.id;
+      });
+
+      setFamilyMembers(members);
+    } finally {
+      setFamilyMembersLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -154,10 +201,16 @@ export default function ProfileScreen() {
       .single()
       .then(({ data }) => { if (data) setProfile(data); });
     loadFamily();
-  }, [user?.id]);
+  }, [user?.id, profileVersion]);
 
   const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? '用户';
   const hasAvatar = !!profile?.avatar_url;
+  const activeMembers = familyMembers.filter((m) => m.status === 1);
+  const previewMembers = activeMembers.slice(0, 2);
+  const previewNameText =
+    activeMembers.length > 0
+      ? `${previewMembers.map((m) => m.displayName).join('、')}${activeMembers.length > 2 ? ` 等${activeMembers.length}人` : ''}`
+      : '';
 
   return (
     <ScreenWrapper className="bg-app-bg">
@@ -177,7 +230,10 @@ export default function ProfileScreen() {
             <Text className="text-base font-semibold text-gray-900">{displayName}</Text>
             <Text className="text-xs text-gray-400 mt-0.5">{user?.email}</Text>
           </View>
-          <TouchableOpacity className="px-3 py-1.5 rounded-full border border-purple-200">
+          <TouchableOpacity
+            onPress={() => setShowEditProfile(true)}
+            className="px-3 py-1.5 rounded-full border border-purple-200"
+          >
             <Text className="text-xs text-purple-600 font-medium">编辑</Text>
           </TouchableOpacity>
         </View>
@@ -212,7 +268,36 @@ export default function ProfileScreen() {
           />
           <SettingRow
             label="家庭成员"
-            onPress={() => {}}
+            value={
+              familyMembersLoading ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : activeMembers.length > 0 ? (
+                <View className="flex-row items-center mr-1" style={{ maxWidth: 210 }}>
+                  <Text className="text-sm text-gray-500" numberOfLines={1}>
+                    {previewNameText}
+                  </Text>
+                  <View className="flex-row items-center ml-2">
+                    {previewMembers.map((member, idx) => (
+                      <View
+                        key={member.id}
+                        style={{
+                          marginLeft: idx === 0 ? 0 : -8,
+                          zIndex: previewMembers.length - idx,
+                        }}
+                      >
+                        <Avatar
+                          uri={member.avatarUrl}
+                          name={member.displayName}
+                          size="sm"
+                          className="border-2 border-white"
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : undefined
+            }
+            onPress={() => setShowFamilyMembers(true)}
           />
           <SettingRow
             label="添加资产账户"
@@ -292,6 +377,129 @@ export default function ProfileScreen() {
         visible={showAssetList}
         onClose={() => setShowAssetList(false)}
       />
+      <ProfileEditModal
+        visible={showEditProfile}
+        userId={user?.id}
+        email={user?.email}
+        initialDisplayName={profile?.display_name}
+        initialAvatarUrl={profile?.avatar_url}
+        onClose={() => setShowEditProfile(false)}
+        onSuccess={(nextProfile: Profile) => {
+          setProfile(nextProfile);
+          setShowEditProfile(false);
+        }}
+      />
+
+      <Modal
+        visible={showFamilyMembers}
+        animationType="slide"
+        transparent={false}
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowFamilyMembers(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: '#E9E8FF' }}>
+          <View className="px-5" style={{ paddingTop: Platform.OS === 'ios' ? 58 : 24, paddingBottom: 10 }}>
+            <View className="flex-row items-center justify-between">
+              <TouchableOpacity onPress={() => setShowFamilyMembers(false)} className="w-9 h-9 rounded-full items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.45)' }}>
+                <Text className="text-gray-500 text-xl">‹</Text>
+              </TouchableOpacity>
+              <Text className="text-[28px] font-bold text-gray-900">家庭成员</Text>
+              <TouchableOpacity className="px-4 py-2 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}>
+                <Text className="text-sm font-medium" style={{ color: Colors.primary }}>添加成员</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {familyMembers.length === 0 ? (
+            <View className="flex-1 items-center justify-center px-6">
+              <Text className="text-base font-semibold text-gray-700">暂无家庭成员</Text>
+              <Text className="text-sm text-gray-500 mt-2">点击右上角添加成员</Text>
+            </View>
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: Platform.OS === 'ios' ? 28 : 20 }}
+            >
+              {familyMembers.map((member) => {
+                const roleMeta: Record<FamilyMember['role'], { label: string; icon: string; bg: string; color: string }> = {
+                  admin: { label: '超级管理员', icon: 'crown', bg: '#EDE9FE', color: '#7C3AED' },
+                  member: { label: '普通成员', icon: 'account', bg: '#DBEAFE', color: '#2563EB' },
+                  guest: { label: '受限成员', icon: 'alert-circle', bg: '#FFEDD5', color: '#EA580C' },
+                };
+
+                const sourceMeta =
+                  member.joinSource === 'creator'
+                    ? { icon: 'account-plus', label: '创建' }
+                    : { icon: 'account-multiple-plus', label: '邀请' };
+
+                const statusMeta =
+                  member.status === 1
+                    ? { icon: 'check-circle', label: '正常', color: '#16A34A' }
+                    : { icon: 'close-circle', label: '已禁用', color: '#EF4444' };
+
+                return (
+                  <View
+                    key={member.id}
+                    className="rounded-3xl px-4 py-3.5 mb-3.5 flex-row items-center"
+                    style={{
+                      backgroundColor: 'rgba(255,255,255,0.7)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(255,255,255,0.6)',
+                    }}
+                  >
+                    <Avatar uri={member.avatarUrl} name={member.displayName} size="md" />
+
+                    <View className="ml-3 flex-1">
+                      <View className="flex-row items-center">
+                        <Text className="text-xl font-semibold text-gray-800 mr-2">{member.displayName}</Text>
+                        <View
+                          className="px-2.5 py-1 rounded-full flex-row items-center"
+                          style={{ backgroundColor: roleMeta[member.role].bg }}
+                        >
+                          <MaterialCommunityIcons
+                            name={roleMeta[member.role].icon as any}
+                            size={11}
+                            color={roleMeta[member.role].color}
+                          />
+                          <Text className="text-[11px] font-semibold ml-1" style={{ color: roleMeta[member.role].color }}>
+                            {roleMeta[member.role].label}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View className="flex-row items-center mt-1.5">
+                        <View className="flex-row items-center mr-3">
+                          <MaterialCommunityIcons name={sourceMeta.icon as any} size={13} color="#9CA3AF" />
+                          <Text className="text-xs text-gray-400 ml-1">{sourceMeta.label}</Text>
+                        </View>
+
+                        <View className="flex-row items-center mr-3">
+                          <MaterialCommunityIcons name="account-arrow-right" size={13} color="#9CA3AF" />
+                          <Text className="text-xs text-gray-400 ml-1">邀请</Text>
+                        </View>
+
+                        <View className="flex-row items-center">
+                          <MaterialCommunityIcons name={statusMeta.icon as any} size={13} color={statusMeta.color} />
+                          <Text className="text-xs font-semibold ml-1" style={{ color: statusMeta.color }}>
+                            {statusMeta.label}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      className="w-8 h-8 rounded-full items-center justify-center"
+                      style={{ backgroundColor: 'rgba(167,139,250,0.12)' }}
+                    >
+                      <MaterialCommunityIcons name="dots-horizontal" size={16} color="#9CA3AF" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
     </ScreenWrapper>
   );
 }

@@ -15,6 +15,7 @@ import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { useAppStore } from '@/stores/appStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,7 @@ const QUADRANT_META: Record<DbAssetQuadrant, { short: string; color: string; bg:
 
 export default function EntryScreen() {
   const { user } = useAuthStore();
+  const profileVersion = useAppStore((state) => state.profileVersion);
 
   const [accounts, setAccounts]               = useState<AccountItem[]>([]);
   const [members, setMembers]                 = useState<MemberInfo[]>([]);
@@ -162,7 +164,7 @@ export default function EntryScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, profileVersion]);
 
   useEffect(() => {
     fetchData();

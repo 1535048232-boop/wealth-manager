@@ -1,6 +1,8 @@
 import { Tabs } from 'expo-router';
 import { Platform, Pressable, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 
 function TabIcon({ name, color }: { name: string; color: string }) {
@@ -14,25 +16,34 @@ function TabIcon({ name, color }: { name: string; color: string }) {
 }
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const tabBarBottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 8 : 10);
+
   return (
     <Tabs
       initialRouteName="index"
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.text.tertiary,
         tabBarStyle: {
           backgroundColor: 'rgba(255,255,255,0.92)',
           borderTopColor: Colors.border,
           borderTopWidth: 0.5,
-          height: Platform.OS === 'ios' ? 88 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 8,
+          height: (Platform.OS === 'ios' ? 66 : 72) + tabBarBottomPadding,
           paddingTop: 8,
+          paddingBottom: tabBarBottomPadding,
+        },
+        tabBarItemStyle: {
+          paddingVertical: Platform.OS === 'android' ? 5 : 4,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: Platform.OS === 'android' ? 12 : 11,
+          lineHeight: Platform.OS === 'android' ? 16 : 14,
           fontWeight: '500',
-          marginTop: 2,
+          marginTop: 0,
+          marginBottom: Platform.OS === 'android' ? 1 : 0,
         },
       }}
     >
@@ -41,7 +52,7 @@ export default function TabLayout() {
         options={{
           title: '首页',
           tabBarIcon: ({ color }) => (
-            <TabIcon name={Platform.OS === 'ios' ? 'house.fill' : 'home'} color={color} />
+            <MaterialCommunityIcons name="home-heart" size={24} color={color} />
           ),
         }}
       />
@@ -74,11 +85,7 @@ export default function TabLayout() {
                   elevation: 6,
                 }}
               >
-                <SymbolView
-                  name={'plus' as any}
-                  tintColor="#fff"
-                  size={24}
-                />
+                <MaterialCommunityIcons name="plus" size={24} color="#fff" />
               </View>
             </Pressable>
           ),
@@ -90,7 +97,7 @@ export default function TabLayout() {
         options={{
           title: '我的',
           tabBarIcon: ({ color }) => (
-            <TabIcon name={Platform.OS === 'ios' ? 'person.fill' : 'person'} color={color} />
+            <MaterialCommunityIcons name="account" size={24} color={color} />
           ),
         }}
       />

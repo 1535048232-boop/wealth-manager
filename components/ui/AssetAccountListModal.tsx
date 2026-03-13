@@ -6,8 +6,11 @@ import {
   ScrollView,
   ActivityIndicator,
   Platform,
+  Alert,
+  Animated,
+  PanResponder,
 } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -57,6 +60,102 @@ interface Props {
   onClose: () => void;
 }
 
+interface SwipeRowProps {
+  children: React.ReactNode;
+  onInvalidate: () => void;
+  invalidating: boolean;
+}
+
+const ACTION_WIDTH = 88;
+
+function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const openedRef = useRef(false);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_evt, gesture) => {
+        const isHorizontal = Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
+        return isHorizontal;
+      },
+      onPanResponderMove: (_evt, gesture) => {
+        const nextX = Math.max(-ACTION_WIDTH, Math.min(0, gesture.dx));
+        translateX.setValue(nextX);
+      },
+      onPanResponderRelease: (_evt, gesture) => {
+        const shouldOpen = gesture.dx < -40 || (gesture.vx < -0.5 && gesture.dx < -10);
+        openedRef.current = shouldOpen;
+        Animated.spring(translateX, {
+          toValue: shouldOpen ? -ACTION_WIDTH : 0,
+          useNativeDriver: true,
+          bounciness: 0,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(translateX, {
+          toValue: openedRef.current ? -ACTION_WIDTH : 0,
+          useNativeDriver: true,
+          bounciness: 0,
+        }).start();
+      },
+    })
+  ).current;
+
+  const handleInvalidate = () => {
+    Animated.timing(translateX, {
+      toValue: 0,
+      duration: 120,
+      useNativeDriver: true,
+    }).start(() => {
+      openedRef.current = false;
+      onInvalidate();
+    });
+  };
+
+  return (
+    <View>
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: ACTION_WIDTH,
+          borderRadius: 20,
+          overflow: 'hidden',
+        }}
+      >
+        <TouchableOpacity
+          onPress={handleInvalidate}
+          disabled={invalidating}
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#EF4444',
+            opacity: invalidating ? 0.7 : 1,
+          }}
+        >
+          {invalidating ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>作废</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={{
+          transform: [{ translateX }],
+        }}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AssetAccountListModal({ visible, onClose }: Props) {
@@ -64,11 +163,13 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
 
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
   const [loading, setLoading] = useState(false);
+  const [invalidatingId, setInvalidatingId] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!visible || !user) return;
+  async function fetchAccounts() {
+    if (!user) return;
+
     setLoading(true);
-    supabase
+    const { data, error } = await supabase
       .from('asset_accounts')
       .select(`
         id,
@@ -83,13 +184,42 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
       `)
       .eq('family_members.user_id', user.id)
       .eq('status', 1)
-      .order('created_at', { ascending: true })
-      .then(({ data, error }) => {
-        if (!error && data) {
-          setAccounts(data as unknown as AssetAccount[]);
-        }
-        setLoading(false);
-      });
+      .order('created_at', { ascending: true });
+
+    if (!error && data) {
+      setAccounts(data as unknown as AssetAccount[]);
+    }
+
+    setLoading(false);
+  }
+
+  function handleInvalidateAccount(id: number) {
+    Alert.alert('作废资产账户', '确认将该资产账户标记为作废吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '作废',
+        style: 'destructive',
+        onPress: async () => {
+          setInvalidatingId(id);
+          const { error } = await supabase
+            .from('asset_accounts')
+            .update({ status: 0 })
+            .eq('id', id);
+
+          if (error) {
+            Alert.alert('操作失败', error.message);
+          } else {
+            setAccounts((prev) => prev.filter((item) => item.id !== id));
+          }
+          setInvalidatingId(null);
+        },
+      },
+    ]);
+  }
+
+  useEffect(() => {
+    if (!visible || !user) return;
+    fetchAccounts();
   }, [visible, user?.id]);
 
   return (
@@ -153,95 +283,100 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
               const quadrantMeta = account.asset_quadrant ? QUADRANT_META[account.asset_quadrant] : null;
 
               return (
-                <View
+                <SwipeRow
                   key={account.id}
-                  style={{
-                    backgroundColor: 'rgba(255,255,255,0.88)',
-                    borderRadius: 20,
-                    paddingHorizontal: 16,
-                    paddingVertical: 14,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    shadowColor: Colors.shadow,
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 1,
-                    shadowRadius: 8,
-                    elevation: 2,
-                  }}
+                  onInvalidate={() => handleInvalidateAccount(account.id)}
+                  invalidating={invalidatingId === account.id}
                 >
-                  {/* Icon */}
                   <View
                     style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 14,
-                      backgroundColor: typeMeta.bgColor,
+                      backgroundColor: 'rgba(255,255,255,0.88)',
+                      borderRadius: 20,
+                      paddingHorizontal: 16,
+                      paddingVertical: 14,
+                      flexDirection: 'row',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      marginRight: 14,
+                      shadowColor: Colors.shadow,
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 1,
+                      shadowRadius: 8,
+                      elevation: 2,
                     }}
                   >
-                    <Text style={{ fontSize: 22 }}>{typeMeta.emoji}</Text>
-                  </View>
-
-                  {/* Info */}
-                  <View style={{ flex: 1 }}>
-                    <Text
+                    {/* Icon */}
+                    <View
                       style={{
-                        fontSize: 15,
-                        fontWeight: '600',
-                        color: Colors.text.primary,
-                        marginBottom: 2,
+                        width: 48,
+                        height: 48,
+                        borderRadius: 14,
+                        backgroundColor: typeMeta.bgColor,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: 14,
                       }}
-                      numberOfLines={1}
                     >
-                      {account.account_name}
-                    </Text>
-                    {account.institution ? (
+                      <Text style={{ fontSize: 22 }}>{typeMeta.emoji}</Text>
+                    </View>
+
+                    {/* Info */}
+                    <View style={{ flex: 1 }}>
                       <Text
-                        style={{ fontSize: 12, color: Colors.text.secondary, marginBottom: 4 }}
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '600',
+                          color: Colors.text.primary,
+                          marginBottom: 2,
+                        }}
                         numberOfLines={1}
                       >
-                        {account.institution}
+                        {account.account_name}
                       </Text>
-                    ) : null}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      {/* Account type tag */}
-                      <View
-                        style={{
-                          paddingHorizontal: 8,
-                          paddingVertical: 2,
-                          borderRadius: 20,
-                          backgroundColor: typeMeta.bgColor,
-                        }}
-                      >
-                        <Text style={{ fontSize: 11, color: Colors.text.secondary }}>
-                          {account.account_type}
+                      {account.institution ? (
+                        <Text
+                          style={{ fontSize: 12, color: Colors.text.secondary, marginBottom: 4 }}
+                          numberOfLines={1}
+                        >
+                          {account.institution}
                         </Text>
-                      </View>
-                      {/* Quadrant tag */}
-                      {quadrantMeta ? (
+                      ) : null}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {/* Account type tag */}
                         <View
                           style={{
                             paddingHorizontal: 8,
                             paddingVertical: 2,
                             borderRadius: 20,
-                            backgroundColor: quadrantMeta.bgColor,
-                            borderWidth: 1,
-                            borderColor: quadrantMeta.borderColor,
+                            backgroundColor: typeMeta.bgColor,
                           }}
                         >
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: quadrantMeta.textColor }}>
-                            {quadrantMeta.label}
+                          <Text style={{ fontSize: 11, color: Colors.text.secondary }}>
+                            {account.account_type}
                           </Text>
                         </View>
-                      ) : null}
+                        {/* Quadrant tag */}
+                        {quadrantMeta ? (
+                          <View
+                            style={{
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 20,
+                              backgroundColor: quadrantMeta.bgColor,
+                              borderWidth: 1,
+                              borderColor: quadrantMeta.borderColor,
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: quadrantMeta.textColor }}>
+                              {quadrantMeta.label}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                     </View>
-                  </View>
 
-                  {/* Arrow */}
-                  <Text style={{ fontSize: 18, color: '#C4B5FD', marginLeft: 8 }}>›</Text>
-                </View>
+                    {/* Arrow */}
+                    <Text style={{ fontSize: 18, color: '#C4B5FD', marginLeft: 8 }}>›</Text>
+                  </View>
+                </SwipeRow>
               );
             })}
           </ScrollView>

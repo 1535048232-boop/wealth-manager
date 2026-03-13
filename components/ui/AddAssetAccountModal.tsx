@@ -38,6 +38,8 @@ const ASSET_TYPES: AssetTypeItem[] = [
   { dbValue: '基金',   label: '基金',   emoji: '📉', bgColor: '#F5F3FF' },
 ];
 
+const OPTIONAL_BASIC_FIELDS_TYPES = new Set<DbAccountType>(['支付宝', '微信', '公积金', '现金']);
+
 // ─── Asset Classification ────────────────────────────────────────────────────
 
 type AssetClass = DbAssetQuadrant;
@@ -85,6 +87,7 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
   const [memberId, setMemberId] = useState<number | null>(null);
+  const skipBasicFields = selectedType ? OPTIONAL_BASIC_FIELDS_TYPES.has(selectedType.dbValue) : false;
 
   // ── Created account summary (for success screen) ──────────────────────────
   const [createdAccount, setCreatedAccount] = useState<{
@@ -128,7 +131,11 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
   }
 
   async function handleCreate() {
-    if (!accountName.trim()) {
+    const normalizedAccountName = skipBasicFields
+      ? (accountName.trim() || selectedType?.label || '')
+      : accountName.trim();
+
+    if (!skipBasicFields && !normalizedAccountName) {
       Alert.alert('提示', '请输入账户名称');
       return;
     }
@@ -142,9 +149,9 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
     try {
       const { error } = await supabase.from('asset_accounts').insert({
         member_id: memberId,
-        account_name: accountName.trim(),
+        account_name: normalizedAccountName,
         account_type: selectedType!.dbValue,
-        institution: institution.trim() || null,
+        institution: skipBasicFields ? null : (institution.trim() || null),
         asset_quadrant: assetClass,
         description: remark.trim() || null,
         status: 1,
@@ -156,9 +163,9 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
       }
 
       setCreatedAccount({
-        name: accountName.trim(),
+        name: normalizedAccountName,
         typeName: selectedType?.label ?? '',
-        institution: institution.trim(),
+        institution: skipBasicFields ? '' : institution.trim(),
         assetClass,
       });
       setStage('success');
@@ -288,27 +295,37 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
               marginBottom: 16,
             }}
           >
-            {/* 账户名称 */}
-            <View style={{ borderBottomWidth: 1, borderBottomColor: '#F3F0FF', paddingHorizontal: 16, paddingVertical: 14 }}>
-              <TextInput
-                value={accountName}
-                onChangeText={setAccountName}
-                placeholder="账户名称"
-                placeholderTextColor="#c4b5fd"
-                style={{ fontSize: 15, color: Colors.text.primary }}
-              />
-            </View>
+            {skipBasicFields ? (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+                <Text style={{ fontSize: 13, color: Colors.text.secondary }}>
+                  当前类型无需填写“账户名称”和“所属机构/开户行”。
+                </Text>
+              </View>
+            ) : (
+              <>
+                {/* 账户名称 */}
+                <View style={{ borderBottomWidth: 1, borderBottomColor: '#F3F0FF', paddingHorizontal: 16, paddingVertical: 14 }}>
+                  <TextInput
+                    value={accountName}
+                    onChangeText={setAccountName}
+                    placeholder="账户名称"
+                    placeholderTextColor="#c4b5fd"
+                    style={{ fontSize: 15, color: Colors.text.primary }}
+                  />
+                </View>
 
-            {/* 所属机构/开户行 */}
-            <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
-              <TextInput
-                value={institution}
-                onChangeText={setInstitution}
-                placeholder="所属机构/开户行"
-                placeholderTextColor="#c4b5fd"
-                style={{ fontSize: 15, color: Colors.text.primary }}
-              />
-            </View>
+                {/* 所属机构/开户行 */}
+                <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+                  <TextInput
+                    value={institution}
+                    onChangeText={setInstitution}
+                    placeholder="所属机构/开户行"
+                    placeholderTextColor="#c4b5fd"
+                    style={{ fontSize: 15, color: Colors.text.primary }}
+                  />
+                </View>
+              </>
+            )}
           </View>
 
           {/* 资产类全 */}

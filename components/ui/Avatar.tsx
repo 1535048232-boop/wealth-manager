@@ -1,5 +1,5 @@
 import { View, Text, Image } from 'react-native';
-import { SymbolView } from 'expo-symbols';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 
 interface AvatarProps {
@@ -18,6 +18,15 @@ export function Avatar({ uri, name, size = 'md', className = '', showCamera = fa
     lg: { container: 'w-16 h-16', text: 'text-xl',   icon: 26 },
   };
   const { container, text, icon } = sizeMap[size];
+  const emojiAvatar = uri?.startsWith('emoji:') ? uri.slice('emoji:'.length) : null;
+
+  if (emojiAvatar) {
+    return (
+      <View className={`rounded-full items-center justify-center ${container} ${className}`} style={{ backgroundColor: Colors.primaryMid }}>
+        <Text style={{ fontSize: size === 'sm' ? 14 : size === 'md' ? 22 : 28 }}>{emojiAvatar}</Text>
+      </View>
+    );
+  }
 
   if (uri) {
     return (
@@ -34,7 +43,7 @@ export function Avatar({ uri, name, size = 'md', className = '', showCamera = fa
         className={`rounded-full items-center justify-center ${container} ${className}`}
         style={{ backgroundColor: Colors.primaryMid }}
       >
-        <SymbolView name="camera.fill" tintColor={Colors.primary} size={icon} />
+        <MaterialCommunityIcons name="camera-outline" size={24} color="black" />
       </View>
     );
   }
