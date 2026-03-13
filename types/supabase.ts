@@ -174,6 +174,37 @@ export interface Database {
           },
         ];
       };
+      asset_daily_snapshots: {
+        Row: {
+          id: number;
+          account_id: number;
+          snapshot_date: string;   // ISO date string, e.g. "2026-03-13"
+          amount: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          account_id: number;
+          snapshot_date?: string;
+          amount: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          account_id?: number;
+          snapshot_date?: string;
+          amount?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "asset_daily_snapshots_account_id_fkey";
+            columns: ["account_id"];
+            referencedRelation: "asset_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

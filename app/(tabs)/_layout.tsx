@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Platform, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { Colors } from '@/constants/Colors';
 
@@ -49,29 +49,38 @@ export default function TabLayout() {
         name="entry"
         options={{
           title: '录入',
-          tabBarIcon: ({ color, focused }) => (
-            <View
+          tabBarButton: ({ onPress }) => (
+            <Pressable
+              onPress={onPress}
               style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: focused ? Colors.primary : Colors.primaryMid,
+                flex: 1,
                 alignItems: 'center',
                 justifyContent: 'center',
-                marginBottom: Platform.OS === 'ios' ? 12 : 4,
-                shadowColor: Colors.primary,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: focused ? 0.3 : 0,
-                shadowRadius: 8,
-                elevation: focused ? 4 : 0,
+                top: -14,
               }}
             >
-              <SymbolView
-                name={'plus' as any}
-                tintColor={focused ? '#fff' : Colors.primary}
-                size={22}
-              />
-            </View>
+              <View
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: Colors.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  shadowColor: Colors.primary,
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.35,
+                  shadowRadius: 10,
+                  elevation: 6,
+                }}
+              >
+                <SymbolView
+                  name={'plus' as any}
+                  tintColor="#fff"
+                  size={24}
+                />
+              </View>
+            </Pressable>
           ),
           tabBarLabel: () => null,
         }}
