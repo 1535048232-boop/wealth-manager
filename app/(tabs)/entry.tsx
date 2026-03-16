@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -180,6 +181,12 @@ export default function EntryScreen() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData]),
+  );
 
   // ── Snapshot save ─────────────────────────────────────────────────────────
 
