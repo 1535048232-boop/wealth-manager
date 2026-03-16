@@ -13,6 +13,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { AddAssetAccountModal } from './AddAssetAccountModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -159,10 +160,11 @@ function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
 export function AssetAccountListModal({ visible, onClose }: Props) {
   const { user } = useAuthStore();
 
-  const [accounts, setAccounts]         = useState<AssetAccount[]>([]);
-  const [loading, setLoading]           = useState(false);
+  const [accounts, setAccounts]             = useState<AssetAccount[]>([]);
+  const [loading, setLoading]               = useState(false);
   const [invalidatingId, setInvalidatingId] = useState<number | null>(null);
-  const [confirmId, setConfirmId]       = useState<number | null>(null);
+  const [confirmId, setConfirmId]           = useState<number | null>(null);
+  const [addVisible, setAddVisible]         = useState(false);
 
   async function fetchAccounts() {
     if (!user) return;
@@ -249,11 +251,24 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
               fontSize: 17,
               fontWeight: '600',
               color: Colors.text.primary,
-              marginRight: 32,
             }}
           >
             我的资产账户
           </Text>
+          <TouchableOpacity
+            onPress={() => setAddVisible(true)}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              backgroundColor: Colors.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            accessibilityLabel="添加资产账户"
+          >
+            <Text style={{ fontSize: 20, color: '#fff', lineHeight: 24, marginTop: -1 }}>+</Text>
+          </TouchableOpacity>
         </View>
 
         {/* ── Content ── */}
@@ -425,6 +440,15 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
           </View>
         )}
       </View>
+
+      {/* ── Add account modal ── */}
+      <AddAssetAccountModal
+        visible={addVisible}
+        onClose={() => {
+          setAddVisible(false);
+          fetchAccounts();
+        }}
+      />
     </Modal>
   );
 }

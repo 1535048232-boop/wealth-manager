@@ -103,14 +103,22 @@ export function useHomeData() {
         (profilesRes.data ?? []).map((p) => [p.id, p])
       );
 
-      // Build latest amount per account (snapshots already sorted DESC by date)
+      // Find the global latest snapshot date across all accounts
+      const maxDate = snapshots.reduce(
+        (max, s) => (s.snapshot_date > max ? s.snapshot_date : max),
+        '',
+      );
+
+      // Build amount per account using ONLY snapshots from maxDate.
+      // Accounts without a snapshot on maxDate contribute 0 to the total.
       const latestByAccount = new Map<number, number>();
       const startOfMonthByAccount = new Map<number, number>();
 
-      for (const snap of snapshots) {
-        const aid = snap.account_id;
-        if (!latestByAccount.has(aid)) {
-          latestByAccount.set(aid, Number(snap.amount));
+      if (maxDate) {
+        for (const snap of snapshots) {
+          if (snap.snapshot_date === maxDate) {
+            latestByAccount.set(snap.account_id, Number(snap.amount));
+          }
         }
       }
 

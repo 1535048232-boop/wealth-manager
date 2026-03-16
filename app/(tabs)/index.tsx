@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { useFocusEffect } from 'expo-router';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Avatar } from '@/components/ui/Avatar';
 import { Colors } from '@/constants/Colors';
@@ -51,10 +52,6 @@ function formatAmount(n: number) {
   let result: string;
   if (abs >= 100000000) {
     result = formatScaled(abs / 100000000, '亿');
-  } else if (abs >= 10000000) {
-    result = formatScaled(abs / 10000000, '千万');
-  } else if (abs >= 1000000) {
-    result = formatScaled(abs / 1000000, '百万');
   } else if (abs >= 10000) {
     result = formatScaled(abs / 10000, '万');
   } else {
@@ -174,7 +171,13 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const greeting = getGreeting();
   const dateLabel = getDateLabel();
-  const { data, isLoading, error } = useHomeData();
+  const { data, isLoading, error, refetch } = useHomeData();
+
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+    }, [refetch]),
+  );
 
   const RIGHT_LEGEND_LIMIT = 5;
   const isNarrowScreen = width < 390;
