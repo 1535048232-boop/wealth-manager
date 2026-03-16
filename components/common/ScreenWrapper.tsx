@@ -10,7 +10,7 @@ interface ScreenWrapperProps {
 export function ScreenWrapper({ children, className = '', safeArea = true }: ScreenWrapperProps) {
   const Wrapper = safeArea ? SafeAreaView : View;
   return (
-    <Wrapper className={`flex-1 bg-white ${className}`}>
+    <Wrapper className={`flex-1 bg-white ${className}`} style={{ backgroundColor: '#F8F7FF' }}>
       {children}
     </Wrapper>
   );

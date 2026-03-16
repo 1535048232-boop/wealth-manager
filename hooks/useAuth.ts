@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
-import { useRouter, useSegments } from 'expo-router';
-import { useAuthStore } from '@/stores/authStore';
+import { useEffect } from "react";
+import { useRouter, useSegments } from "expo-router";
+import { useAuthStore } from "@/stores/authStore";
 
 export function useProtectedRoute() {
   const { session, initialized } = useAuthStore();
@@ -10,12 +10,14 @@ export function useProtectedRoute() {
   useEffect(() => {
     if (!initialized) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
+    const inAuthGroup = segments[0] === "(auth)";
 
     if (!session && !inAuthGroup) {
-      router.replace('/(auth)/login');
+      // Not logged in and not on an auth screen → go to login
+      router.replace("/(auth)/login");
     } else if (session && inAuthGroup) {
-      router.replace('/(tabs)');
+      // Already logged in and on an auth screen → go to home
+      router.replace("/(tabs)");
     }
   }, [session, initialized, segments]);
 }
