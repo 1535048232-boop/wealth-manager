@@ -6,7 +6,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Platform,
-  Alert,
   Animated,
   PanResponder,
 } from 'react-native';
@@ -68,89 +67,88 @@ interface SwipeRowProps {
 
 const ACTION_WIDTH = 88;
 
+// ─── SwipeRow ─────────────────────────────────────────────────────────────────
+// Card + action button move together via translateX.
+// actionWidth (non-native driver) clips the button from 0 → ACTION_WIDTH so
+// it is invisible until the user actually swipes left.
+
 function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const openedRef = useRef(false);
+  const translateX  = useRef(new Animated.Value(0)).current;
+  const actionWidth = useRef(new Animated.Value(0)).current;
+  const openedRef   = useRef(false);
+
+  function animateTo(open: boolean) {
+    openedRef.current = open;
+    Animated.spring(translateX, {
+      toValue: open ? -ACTION_WIDTH : 0,
+      useNativeDriver: true,
+      bounciness: 0,
+    }).start();
+    Animated.spring(actionWidth, {
+      toValue: open ? ACTION_WIDTH : 0,
+      useNativeDriver: false,
+      bounciness: 0,
+    }).start();
+  }
 
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gesture) => {
-        const isHorizontal = Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
-        return isHorizontal;
-      },
+      onMoveShouldSetPanResponder: (_evt, gesture) =>
+        Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
       onPanResponderMove: (_evt, gesture) => {
-        const nextX = Math.max(-ACTION_WIDTH, Math.min(0, gesture.dx));
-        translateX.setValue(nextX);
+        const dx = Math.max(-ACTION_WIDTH, Math.min(0, gesture.dx));
+        translateX.setValue(dx);
+        actionWidth.setValue(-dx);
       },
       onPanResponderRelease: (_evt, gesture) => {
         const shouldOpen = gesture.dx < -40 || (gesture.vx < -0.5 && gesture.dx < -10);
-        openedRef.current = shouldOpen;
-        Animated.spring(translateX, {
-          toValue: shouldOpen ? -ACTION_WIDTH : 0,
-          useNativeDriver: true,
-          bounciness: 0,
-        }).start();
+        animateTo(shouldOpen);
       },
       onPanResponderTerminate: () => {
-        Animated.spring(translateX, {
-          toValue: openedRef.current ? -ACTION_WIDTH : 0,
-          useNativeDriver: true,
-          bounciness: 0,
-        }).start();
+        animateTo(openedRef.current);
       },
     })
   ).current;
 
   const handleInvalidate = () => {
-    Animated.timing(translateX, {
-      toValue: 0,
-      duration: 120,
-      useNativeDriver: true,
-    }).start(() => {
-      openedRef.current = false;
-      onInvalidate();
-    });
+    openedRef.current = false;
+    onInvalidate();
+    Animated.timing(translateX,  { toValue: 0, duration: 120, useNativeDriver: true  }).start();
+    Animated.timing(actionWidth, { toValue: 0, duration: 120, useNativeDriver: false }).start();
   };
 
   return (
-    <View>
-      <View
-        style={{
-          position: 'absolute',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: ACTION_WIDTH,
-          borderRadius: 20,
-          overflow: 'hidden',
-        }}
-      >
-        <TouchableOpacity
-          onPress={handleInvalidate}
-          disabled={invalidating}
-          style={{
-            flex: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#EF4444',
-            opacity: invalidating ? 0.7 : 1,
-          }}
-        >
-          {invalidating ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>作废</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
+    <View style={{ overflow: 'hidden', borderRadius: 20 }}>
       <Animated.View
         {...panResponder.panHandlers}
-        style={{
-          transform: [{ translateX }],
-        }}
+        style={{ flexDirection: 'row', transform: [{ translateX }] }}
       >
-        {children}
+        {/* Card content */}
+        <View style={{ flex: 1 }}>
+          {children}
+        </View>
+
+        {/* Action button — clipped to 0 width until swipe */}
+        <Animated.View style={{ width: actionWidth, overflow: 'hidden' }}>
+          <TouchableOpacity
+            onPress={handleInvalidate}
+            disabled={invalidating}
+            style={{
+              width: ACTION_WIDTH,
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#EF4444',
+              opacity: invalidating ? 0.7 : 1,
+            }}
+          >
+            {invalidating ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>作废</Text>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
       </Animated.View>
     </View>
   );
@@ -161,9 +159,10 @@ function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
 export function AssetAccountListModal({ visible, onClose }: Props) {
   const { user } = useAuthStore();
 
-  const [accounts, setAccounts] = useState<AssetAccount[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts]         = useState<AssetAccount[]>([]);
+  const [loading, setLoading]           = useState(false);
   const [invalidatingId, setInvalidatingId] = useState<number | null>(null);
+  const [confirmId, setConfirmId]       = useState<number | null>(null);
 
   async function fetchAccounts() {
     if (!user) return;
@@ -187,34 +186,33 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
       .order('created_at', { ascending: true });
 
     if (!error && data) {
-      setAccounts(data as unknown as AssetAccount[]);
+      const activeAccounts = (data as unknown as AssetAccount[]).filter((item) => item.status === 1);
+      setAccounts(activeAccounts);
     }
 
     setLoading(false);
   }
 
   function handleInvalidateAccount(id: number) {
-    Alert.alert('作废资产账户', '确认将该资产账户标记为作废吗？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '作废',
-        style: 'destructive',
-        onPress: async () => {
-          setInvalidatingId(id);
-          const { error } = await supabase
-            .from('asset_accounts')
-            .update({ status: 0 })
-            .eq('id', id);
+    setConfirmId(id);
+  }
 
-          if (error) {
-            Alert.alert('操作失败', error.message);
-          } else {
-            setAccounts((prev) => prev.filter((item) => item.id !== id));
-          }
-          setInvalidatingId(null);
-        },
-      },
-    ]);
+  async function confirmInvalidate() {
+    if (confirmId === null) return;
+    const id = confirmId;
+    setConfirmId(null);
+    setInvalidatingId(id);
+
+    const { error } = await supabase
+      .from('asset_accounts')
+      .update({ status: 0 })
+      .eq('id', id)
+      .eq('status', 1);
+
+    if (!error) {
+      setAccounts((prev) => prev.filter((item) => item.id !== id));
+    }
+    setInvalidatingId(null);
   }
 
   useEffect(() => {
@@ -279,7 +277,7 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32, gap: 12 }}
           >
             {accounts.map((account) => {
-              const typeMeta = TYPE_META[account.account_type] ?? TYPE_META['其他'];
+              const typeMeta     = TYPE_META[account.account_type] ?? TYPE_META['其他'];
               const quadrantMeta = account.asset_quadrant ? QUADRANT_META[account.asset_quadrant] : null;
 
               return (
@@ -321,12 +319,7 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
                     {/* Info */}
                     <View style={{ flex: 1 }}>
                       <Text
-                        style={{
-                          fontSize: 15,
-                          fontWeight: '600',
-                          color: Colors.text.primary,
-                          marginBottom: 2,
-                        }}
+                        style={{ fontSize: 15, fontWeight: '600', color: Colors.text.primary, marginBottom: 2 }}
                         numberOfLines={1}
                       >
                         {account.account_name}
@@ -340,20 +333,9 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
                         </Text>
                       ) : null}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        {/* Account type tag */}
-                        <View
-                          style={{
-                            paddingHorizontal: 8,
-                            paddingVertical: 2,
-                            borderRadius: 20,
-                            backgroundColor: typeMeta.bgColor,
-                          }}
-                        >
-                          <Text style={{ fontSize: 11, color: Colors.text.secondary }}>
-                            {account.account_type}
-                          </Text>
+                        <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20, backgroundColor: typeMeta.bgColor }}>
+                          <Text style={{ fontSize: 11, color: Colors.text.secondary }}>{account.account_type}</Text>
                         </View>
-                        {/* Quadrant tag */}
                         {quadrantMeta ? (
                           <View
                             style={{
@@ -380,6 +362,67 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
               );
             })}
           </ScrollView>
+        )}
+
+        {/* ── Inline confirm dialog ── */}
+        {confirmId !== null && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.45)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: 32,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: '#fff',
+                borderRadius: 20,
+                padding: 24,
+                width: '100%',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.15,
+                shadowRadius: 24,
+                elevation: 12,
+              }}
+            >
+              <Text style={{ fontSize: 17, fontWeight: '700', color: Colors.text.primary, marginBottom: 8 }}>
+                作废资产账户
+              </Text>
+              <Text style={{ fontSize: 14, color: Colors.text.secondary, marginBottom: 24, lineHeight: 20 }}>
+                确认将该资产账户标记为作废吗？此操作不可撤销。
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setConfirmId(null)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    alignItems: 'center',
+                    backgroundColor: '#F3F4F6',
+                  }}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: Colors.text.primary }}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={confirmInvalidate}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    alignItems: 'center',
+                    backgroundColor: '#EF4444',
+                  }}
+                >
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>作废</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
         )}
       </View>
     </Modal>

@@ -47,17 +47,17 @@ const FILTER_TYPES: (DbAccountType | '全部')[] = [
   '全部', '银行卡', '股票', '公积金', '期权', '基金', '支付宝', '微信', '现金', '保险', '其他',
 ];
 
-const TYPE_ICON_COLOR: Record<string, string> = {
-  银行卡: '#6D28D9',
-  支付宝: '#3B82F6',
-  微信:   '#22C55E',
-  公积金: '#7C3AED',
-  股票:   '#F97316',
-  期权:   '#EAB308',
-  现金:   '#84CC16',
-  保险:   '#0EA5E9',
-  基金:   '#8B5CF6',
-  其他:   '#9CA3AF',
+const TYPE_META: Record<string, { emoji: string; bgColor: string }> = {
+  银行卡: { emoji: '💳', bgColor: '#EEF2FF' },
+  支付宝: { emoji: '💰', bgColor: '#EFF6FF' },
+  微信:   { emoji: '💬', bgColor: '#F0FDF4' },
+  公积金: { emoji: '🏠', bgColor: '#F5F3FF' },
+  股票:   { emoji: '📈', bgColor: '#FFF7ED' },
+  期权:   { emoji: '📊', bgColor: '#FFF7ED' },
+  现金:   { emoji: '💵', bgColor: '#FFFBEB' },
+  保险:   { emoji: '🛡️', bgColor: '#F0FDFA' },
+  基金:   { emoji: '📉', bgColor: '#F5F3FF' },
+  其他:   { emoji: '📁', bgColor: '#F9FAFB' },
 };
 
 const QUADRANT_META: Record<DbAssetQuadrant, { short: string; color: string; bg: string; border: string }> = {
@@ -251,14 +251,9 @@ export default function EntryScreen() {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  const iconChar = (account: AccountItem) => {
-    const src = account.institution ?? account.account_name;
-    return src.charAt(0).toUpperCase();
-  };
-
   // ── Sub-renders ───────────────────────────────────────────────────────────
 
-  const renderHeader = () => (
+  const renderFixedFilters = () => (
     <View>
       {/* Member filter */}
       {members.length > 0 && (
@@ -288,7 +283,12 @@ export default function EntryScreen() {
       {/* Asset quadrant filter */}
       <View style={styles.filterSection}>
         <Text style={styles.filterLabel}>资产分类</Text>
-        <View style={styles.pillRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quadrantTabsContent}
+          style={styles.quadrantTabsRow}
+        >
           <FilterPill
             label="全部"
             active={selectedQuadrant === null}
@@ -319,8 +319,13 @@ export default function EntryScreen() {
               </TouchableOpacity>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
+    </View>
+  );
+
+  const renderHeader = () => (
+    <View>
 
       {/* Loading or empty */}
       {loading && (
@@ -357,8 +362,7 @@ export default function EntryScreen() {
 
   const renderItem = ({ item }: { item: AccountItem }) => {
     const qMeta     = item.asset_quadrant ? QUADRANT_META[item.asset_quadrant] : null;
-    const iconColor = TYPE_ICON_COLOR[item.account_type] ?? '#9CA3AF';
-    const char      = iconChar(item);
+    const typeMeta  = TYPE_META[item.account_type] ?? TYPE_META['其他'];
     const isEditing = editingId === item.id;
     const savedAmt  = snapshotMap[item.id];
 
@@ -369,8 +373,8 @@ export default function EntryScreen() {
         onPress={() => !isEditing && openEdit(item)}
       >
         {/* Icon */}
-        <View style={[styles.iconCircle, { backgroundColor: iconColor + '22' }]}>
-          <Text style={[styles.iconChar, { color: iconColor }]}>{char}</Text>
+        <View style={[styles.iconCircle, { backgroundColor: typeMeta.bgColor }] }>
+          <Text style={styles.iconEmoji}>{typeMeta.emoji}</Text>
         </View>
 
         {/* Text block */}
@@ -444,7 +448,7 @@ export default function EntryScreen() {
       </View>
 
       {/* ── Search bar ── */}
-      <View style={styles.searchWrapper}>
+      {/* <View style={styles.searchWrapper}>
         <View style={styles.searchBar}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
@@ -457,7 +461,7 @@ export default function EntryScreen() {
             clearButtonMode="while-editing"
           />
         </View>
-      </View>
+      </View> */}
 
       {/* ── Account type horizontal tabs ── */}
       <ScrollView
@@ -493,6 +497,8 @@ export default function EntryScreen() {
       </ScrollView>
 
       {/* ── Main list ── */}
+      {renderFixedFilters()}
+
       <FlatList
         data={filtered}
         keyExtractor={item => String(item.id)}
@@ -593,21 +599,30 @@ const styles = StyleSheet.create({
   // Type filter tabs
   typeTabsRow: {
     flexGrow: 0,
+    minHeight: 44,
+    paddingTop: 2,
     marginBottom: 4,
+    overflow: 'visible',
   },
   typeTabsContent: {
     paddingHorizontal: 16,
+    paddingTop: 2,
     paddingBottom: 8,
     gap: 8,
+    alignItems: 'center',
   },
   typeTab: {
     paddingHorizontal: 16,
-    paddingVertical: 7,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 99,
     borderWidth: 1.5,
   },
   typeTabText: {
     fontSize: 14,
+    lineHeight: 18,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
   },
 
   // Filters
@@ -635,6 +650,14 @@ const styles = StyleSheet.create({
   pillText: {
     fontSize: 13,
   },
+  quadrantTabsRow: {
+    flexGrow: 0,
+  },
+  quadrantTabsContent: {
+    gap: 8,
+    paddingRight: 16,
+    alignItems: 'center',
+  },
 
   // List
   listContent: {
@@ -657,16 +680,15 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   iconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  iconChar: {
-    fontSize: 18,
-    fontWeight: '700',
+  iconEmoji: {
+    fontSize: 21,
   },
   cardRow: {
     flexDirection: 'row',

@@ -24,6 +24,21 @@ type FamilyMember = {
   status: 1 | 0 | -1;
 };
 
+type AssetAccountType = '银行卡' | '支付宝' | '微信' | '公积金' | '股票' | '期权' | '现金' | '保险' | '基金' | '其他';
+
+const ASSET_ACCOUNT_TYPE_META: Record<AssetAccountType, { emoji: string; bgColor: string }> = {
+  银行卡: { emoji: '💳', bgColor: '#EEF2FF' },
+  支付宝: { emoji: '💰', bgColor: '#EFF6FF' },
+  微信: { emoji: '💬', bgColor: '#F0FDF4' },
+  公积金: { emoji: '🏠', bgColor: '#F5F3FF' },
+  股票: { emoji: '📈', bgColor: '#FFF7ED' },
+  期权: { emoji: '📊', bgColor: '#FFF7ED' },
+  现金: { emoji: '💵', bgColor: '#FFFBEB' },
+  保险: { emoji: '🛡️', bgColor: '#F0FDFA' },
+  基金: { emoji: '📉', bgColor: '#F5F3FF' },
+  其他: { emoji: '📁', bgColor: '#F9FAFB' },
+};
+
 // ─── Reusable row components ────────────────────────────────────────────────
 
 function SectionHeader({ title }: { title: string }) {
@@ -117,6 +132,8 @@ export default function ProfileScreen() {
   const [familyMembersLoading, setFamilyMembersLoading] = useState(false);
   const [showFamilyMembers, setShowFamilyMembers] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [assetAccountCount, setAssetAccountCount] = useState(0);
+  const [assetPreviewAccounts, setAssetPreviewAccounts] = useState<Array<{ id: number; account_type: AssetAccountType }>>([]);
 
   async function loadFamily() {
     if (!user) return;
@@ -138,13 +155,14 @@ export default function ProfileScreen() {
     // Step 2: fetch full family details by family_id
     const { data: familyData } = await supabase
       .from('families')
-      .select('id, family_name, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+      .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
       .eq('id', memberData.family_id)
       .maybeSingle();
 
     const f = familyData as {
       id: number;
       family_name: string;
+      family_avatar: string | null;
       currency: string;
       debt_warning_threshold: number;
       repayment_reminder_switch: 0 | 1;
@@ -154,6 +172,7 @@ export default function ProfileScreen() {
     if (f) setFamily({
       id: f.id,
       family_name: f.family_name,
+      family_avatar: f.family_avatar,
       currency: f.currency,
       debt_warning_threshold: Number(f.debt_warning_threshold),
       repayment_reminder_switch: f.repayment_reminder_switch,
@@ -192,6 +211,32 @@ export default function ProfileScreen() {
     }
   }
 
+  async function loadAssetAccountsPreview() {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('asset_accounts')
+      .select(`
+        id,
+        account_type,
+        status,
+        created_at,
+        family_members!inner(user_id)
+      `)
+      .eq('family_members.user_id', user.id)
+      .eq('status', 1)
+      .order('created_at', { ascending: true });
+
+    if (error || !data) {
+      return;
+    }
+
+    const activeAccounts = (data as Array<{ id: number; account_type: AssetAccountType; status: 0 | 1 }>).filter((item) => item.status === 1);
+    setAssetAccountCount(activeAccounts.length);
+    // Keep preview consistent with "我的资产账户"列表：取同排序下的前三条记录。
+    setAssetPreviewAccounts(activeAccounts.slice(0, 3).map((item) => ({ id: item.id, account_type: item.account_type ?? '其他' })));
+  }
+
   useEffect(() => {
     if (!user) return;
     supabase
@@ -201,6 +246,7 @@ export default function ProfileScreen() {
       .single()
       .then(({ data }) => { if (data) setProfile(data); });
     loadFamily();
+    loadAssetAccountsPreview();
   }, [user?.id, profileVersion]);
 
   const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? '用户';
@@ -261,6 +307,16 @@ export default function ProfileScreen() {
           <SettingRow
             label={family ? '家庭设置' : '创建家庭'}
             sublabel={family ? family.family_name : undefined}
+            value={
+              family ? (
+                <Avatar
+                  uri={family.family_avatar}
+                  name={family.family_name}
+                  size="sm"
+                  className="mr-1"
+                />
+              ) : undefined
+            }
             onPress={() => {
               setFamilyModalMode(family ? 'view' : 'create');
               setShowCreateFamily(true);
@@ -305,6 +361,39 @@ export default function ProfileScreen() {
           />
           <SettingRow
             label="我的资产账户"
+            value={
+              assetAccountCount > 0 ? (
+                <View className="flex-row items-center mr-1">
+                  <Text className="text-sm text-gray-400">{assetAccountCount}项</Text>
+                  <View className="flex-row items-center ml-2">
+                    {assetPreviewAccounts.map((account, idx) => {
+                      const meta = ASSET_ACCOUNT_TYPE_META[account.account_type] ?? ASSET_ACCOUNT_TYPE_META['其他'];
+                      return (
+                        <View
+                          key={account.id}
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 15,
+                            marginLeft: idx === 0 ? 0 : -8,
+                            backgroundColor: meta.bgColor,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderWidth: 1.5,
+                            borderColor: '#FFFFFF',
+                            zIndex: assetPreviewAccounts.length - idx,
+                          }}
+                        >
+                          <Text style={{ fontSize: 14 }}>{meta.emoji}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : (
+                <Text className="text-sm text-gray-400 mr-1">0项</Text>
+              )
+            }
             onPress={() => setShowAssetList(true)}
             last
           />
@@ -371,11 +460,17 @@ export default function ProfileScreen() {
       />
       <AddAssetAccountModal
         visible={showAddAsset}
-        onClose={() => setShowAddAsset(false)}
+        onClose={() => {
+          setShowAddAsset(false);
+          loadAssetAccountsPreview();
+        }}
       />
       <AssetAccountListModal
         visible={showAssetList}
-        onClose={() => setShowAssetList(false)}
+        onClose={() => {
+          setShowAssetList(false);
+          loadAssetAccountsPreview();
+        }}
       />
       <ProfileEditModal
         visible={showEditProfile}
