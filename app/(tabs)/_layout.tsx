@@ -1,19 +1,8 @@
 import { Tabs } from 'expo-router';
 import { Platform, Pressable, View } from 'react-native';
-import { SymbolView } from 'expo-symbols';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
-
-function TabIcon({ name, color }: { name: string; color: string }) {
-  return (
-    <SymbolView
-      name={name as any}
-      tintColor={color}
-      size={24}
-    />
-  );
-}
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
