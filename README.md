@@ -30,7 +30,10 @@ npm install
 ```bash
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+EXPO_PUBLIC_WEB_BASE_URL=https://your-web-domain.com
 ```
+
+`EXPO_PUBLIC_WEB_BASE_URL` 用于生成 H5 邀请链接（如 `https://your-web-domain.com/invite?code=xxxx`），未配置时会自动回退到 App Deep Link（`myapp://invite?code=xxxx`）。
 
 > Supabase 控制台 → Project Settings → API 获取以上信息
 
