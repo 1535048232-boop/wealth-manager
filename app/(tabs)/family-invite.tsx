@@ -15,6 +15,7 @@ interface InviteRow {
   invitee_contact_type: 1 | 2;
   invite_code: string;
   status: 0 | 1 | -1;
+  last_send_time: string | null;
   expire_time: string;
   created_at: string;
 }
@@ -71,6 +72,28 @@ function buildInviteLink(inviteCode: string): string {
   });
 }
 
+function formatDateTime(dateLike: string | null): string {
+  if (!dateLike) return '未发送提醒';
+  const date = new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return '未发送提醒';
+  return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+interface SendInvitationResult {
+  sent: boolean;
+  channel: 'email' | 'none';
+  message: string;
+  fallback: 'none' | 'manual_share';
+}
+
+interface FunctionEnvelope<T> {
+  data: T | null;
+  error: {
+    code: string;
+    message: string;
+  } | null;
+}
+
 export default function FamilyInviteScreen() {
   const { user } = useAuthStore();
   const router = useRouter();
@@ -85,6 +108,7 @@ export default function FamilyInviteScreen() {
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
   const [recentInvites, setRecentInvites] = useState<InviteRow[]>([]);
+  const [sendingInvitationId, setSendingInvitationId] = useState<number | null>(null);
   const isSharingRef = useRef(false);
 
   const isAdmin = context?.role === 'admin';
@@ -130,7 +154,7 @@ export default function FamilyInviteScreen() {
     try {
       const { data, error } = await supabase
         .from('family_invitations')
-        .select('id, invitee_contact, invitee_contact_type, invite_code, status, expire_time, created_at')
+        .select('id, invitee_contact, invitee_contact_type, invite_code, status, last_send_time, expire_time, created_at')
         .eq('family_id', familyId)
         .order('created_at', { ascending: false })
         .limit(8);
@@ -150,6 +174,61 @@ export default function FamilyInviteScreen() {
     if (!context?.familyId) return;
     loadRecentInvites(context.familyId);
   }, [context?.familyId]);
+
+  async function triggerReminder(invitationId: number): Promise<{ ok: boolean; delivered: boolean; message: string }> {
+    try {
+      const { data, error } = await supabase.functions.invoke<FunctionEnvelope<SendInvitationResult>>('send-family-invitation', {
+        body: {
+          invitationId,
+        },
+      });
+
+      if (error) {
+        return { ok: false, delivered: false, message: error.message || '提醒发送失败，请稍后重试' };
+      }
+
+      if (data?.error) {
+        return { ok: false, delivered: false, message: data.error.message || '提醒发送失败，请稍后重试' };
+      }
+
+      if (!data?.data) {
+        return { ok: false, delivered: false, message: '提醒发送失败，请稍后重试' };
+      }
+
+      return {
+        ok: true,
+        delivered: data.data.sent,
+        message: data.data.message || (data.data.channel === 'email' ? '邮箱提醒已发送' : '提醒已处理'),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '提醒发送失败，请稍后重试';
+      return { ok: false, delivered: false, message };
+    }
+  }
+
+  async function resendInvitation(item: InviteRow) {
+    if (!context || item.status !== 0 || sendingInvitationId) return;
+
+    if (item.invitee_contact_type !== 2) {
+      Alert.alert('暂不支持手机号自动提醒', '请使用“分享”按钮把邀请链接发送给对方');
+      return;
+    }
+
+    setSendingInvitationId(item.id);
+    try {
+      const result = await triggerReminder(item.id);
+      await loadRecentInvites(context.familyId);
+
+      if (!result.ok) {
+        Alert.alert('提醒发送失败', result.message);
+        return;
+      }
+
+      Alert.alert(result.delivered ? '提醒已发送' : '提醒未自动发送', result.message);
+    } finally {
+      setSendingInvitationId(null);
+    }
+  }
 
   async function createInvitation(sendNow: boolean) {
     if (!context) {
@@ -172,21 +251,27 @@ export default function FamilyInviteScreen() {
     try {
       const normalizedContact = contact.trim();
       let createdCode = '';
+      let createdInvitationId: number | null = null;
 
       for (let i = 0; i < 5; i += 1) {
         const nextCode = generateInviteCode(8);
-        const { error } = await supabase.from('family_invitations').insert({
-          family_id: context.familyId,
-          inviter_id: context.memberId,
-          invitee_contact: normalizedContact,
-          invitee_contact_type: contactMode === 'phone' ? 1 : 2,
-          invite_code: nextCode,
-          last_send_time: sendNow ? new Date().toISOString() : null,
-          status: 0,
-        });
+        const { data, error } = await supabase
+          .from('family_invitations')
+          .insert({
+            family_id: context.familyId,
+            inviter_id: context.memberId,
+            invitee_contact: normalizedContact,
+            invitee_contact_type: contactMode === 'phone' ? 1 : 2,
+            invite_code: nextCode,
+            last_send_time: null,
+            status: 0,
+          })
+          .select('id, invite_code')
+          .single();
 
-        if (!error) {
-          createdCode = nextCode;
+        if (!error && data) {
+          createdCode = data.invite_code;
+          createdInvitationId = data.id;
           break;
         }
 
@@ -198,13 +283,23 @@ export default function FamilyInviteScreen() {
         return;
       }
 
+      let reminderMessage = '你可稍后手动分享邀请链接';
+      if (sendNow && createdInvitationId) {
+        if (contactMode === 'email') {
+          const result = await triggerReminder(createdInvitationId);
+          reminderMessage = result.ok ? result.message : `提醒发送失败：${result.message}`;
+        } else {
+          reminderMessage = '手机号暂不支持自动提醒，请点击“分享”发送邀请链接';
+        }
+      }
+
       setContact('');
       setShowRoleMenu(false);
       await loadRecentInvites(context.familyId);
 
       Alert.alert(
-        sendNow ? '邀请已发送' : '邀请码已生成',
-        `邀请码：${createdCode}\n被邀方式：${contactLabel}\n角色：${inviteRole === 'member' ? '普通成员' : '受限成员'}`,
+        sendNow ? '邀请已创建' : '邀请码已生成',
+        `邀请码：${createdCode}\n被邀方式：${contactLabel}\n角色：${inviteRole === 'member' ? '普通成员' : '受限成员'}\n提醒状态：${reminderMessage}`,
       );
     } catch (error) {
       console.error('[FamilyInviteScreen] createInvitation failed:', error);
@@ -349,7 +444,7 @@ export default function FamilyInviteScreen() {
             onPress={() => createInvitation(true)}
             disabled={!isAdmin || saving || loading}
           >
-            <Text className="text-lg font-semibold text-white">发送邀请</Text>
+            <Text className="text-lg font-semibold text-white">创建并尝试发送提醒</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -365,7 +460,11 @@ export default function FamilyInviteScreen() {
             <Text className="text-xs mt-2 text-center" style={{ color: '#DC2626' }}>
               仅家庭管理员可创建邀请
             </Text>
-          ) : null}
+          ) : (
+            <Text className="text-xs mt-2 text-center" style={{ color: Colors.text.tertiary }}>
+              若自动提醒不可用，将自动降级为手动分享邀请链接
+            </Text>
+          )}
         </View>
 
         <View className="mx-4 mt-6 rounded-3xl p-4" style={{ backgroundColor: 'rgba(255,255,255,0.66)', borderColor: 'rgba(255,255,255,0.8)', borderWidth: 1 }}>
@@ -393,6 +492,19 @@ export default function FamilyInviteScreen() {
                           <MaterialCommunityIcons name="share-variant" size={12} color={Colors.primary} />
                           <Text className="text-xs font-semibold ml-1" style={{ color: Colors.primary }}>分享</Text>
                         </TouchableOpacity>
+                        {item.status === 0 && item.invitee_contact_type === 2 ? (
+                          <TouchableOpacity
+                            className="px-2.5 py-1 rounded-full mr-2 flex-row items-center"
+                            style={{ backgroundColor: '#ECFDF5', opacity: sendingInvitationId === item.id ? 0.65 : 1 }}
+                            onPress={() => resendInvitation(item)}
+                            disabled={sendingInvitationId !== null}
+                          >
+                            <MaterialCommunityIcons name="bell-ring-outline" size={12} color="#16A34A" />
+                            <Text className="text-xs font-semibold ml-1" style={{ color: '#16A34A' }}>
+                              {sendingInvitationId === item.id ? '发送中' : '提醒'}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
                         <View className="px-2 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
                           <Text className="text-xs font-semibold" style={{ color: statusMeta.color }}>{statusMeta.label}</Text>
                         </View>
@@ -400,6 +512,9 @@ export default function FamilyInviteScreen() {
                     </View>
                     <Text className="text-xs mt-1" style={{ color: Colors.text.secondary }}>
                       {contactTypeLabel} | 邀请码 {item.invite_code}
+                    </Text>
+                    <Text className="text-xs mt-1" style={{ color: Colors.text.secondary }}>
+                      最近提醒 {formatDateTime(item.last_send_time)}
                     </Text>
                     <Text className="text-xs mt-1" numberOfLines={1} style={{ color: Colors.text.tertiary }}>
                       链接 {buildInviteLink(item.invite_code)}

@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, Switch, Platform, Modal, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Platform, Modal, ActivityIndicator, Alert } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
@@ -99,30 +99,6 @@ function SettingRow({
   );
 }
 
-function ToggleRow({ label, sublabel, value, onChange, last = false }: {
-  label: string;
-  sublabel?: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-  last?: boolean;
-}) {
-  return (
-    <View className={`flex-row items-center px-4 py-3 ${!last ? 'border-b border-gray-50' : ''}`}>
-      <View className="flex-1">
-        <Text className="text-sm font-medium text-gray-900">{label}</Text>
-        {sublabel ? <Text className="text-xs text-gray-400 mt-0.5">{sublabel}</Text> : null}
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: '#E5E7EB', true: Colors.primaryLight }}
-        thumbColor={Platform.OS === 'android' ? (value ? Colors.primary : '#fff') : '#fff'}
-        ios_backgroundColor="#E5E7EB"
-      />
-    </View>
-  );
-}
-
 // ─── Screen ─────────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
@@ -132,9 +108,6 @@ export default function ProfileScreen() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [family, setFamily] = useState<Family | null>(null);
-  const [biometric, setBiometric] = useState(false);
-  const [repaymentReminder, setRepaymentReminder] = useState(true);
-  const [monthlyReport, setMonthlyReport] = useState(true);
   const [showCreateFamily, setShowCreateFamily] = useState(false);
   const [familyModalMode, setFamilyModalMode] = useState<'create' | 'view'>('create');
   const [showAddAsset, setShowAddAsset] = useState(false);
@@ -406,23 +379,6 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── 账户安全 ── */}
-        <SectionHeader title="账户安全" />
-        <RowCard>
-          <ToggleRow
-            label="人脸识别 / 指纹解锁"
-            value={biometric}
-            onChange={setBiometric}
-          />
-          <SettingRow label="支付密码" onPress={() => {}} />
-          <SettingRow
-            label="隐私模式"
-            sublabel="快速隐藏敏感数据"
-            onPress={() => {}}
-            last
-          />
-        </RowCard>
-
         {/* ── 家庭管理 ── */}
         <SectionHeader title="家庭管理" />
         <RowCard>
@@ -519,48 +475,6 @@ export default function ProfileScreen() {
             onPress={() => setShowAssetList(true)}
             last
           />
-        </RowCard>
-
-        {/* ── 通知提醒 ── */}
-        <SectionHeader title="通知提醒" />
-        <RowCard>
-          <ToggleRow label="还款日提醒" value={repaymentReminder} onChange={setRepaymentReminder} />
-          <ToggleRow label="月度报告推送" value={monthlyReport} onChange={setMonthlyReport} />
-          <SettingRow
-            label="大额支出预警"
-            value={<Text className="text-sm text-gray-400 mr-1">¥10,000</Text>}
-            onPress={() => {}}
-            last
-          />
-        </RowCard>
-
-        {/* ── 外观 ── */}
-        <SectionHeader title="外观" />
-        <RowCard>
-          <SettingRow
-            label="主题切换"
-            value={<Text className="text-sm text-gray-400 mr-1">🌙</Text>}
-            onPress={() => {}}
-          />
-          <SettingRow
-            label="配色方案"
-            value={
-              <View className="flex-row items-center mr-1">
-                <View className="w-3 h-3 rounded-full mr-1.5" style={{ backgroundColor: Colors.primary }} />
-                <Text className="text-sm text-gray-400">柔雾紫境</Text>
-              </View>
-            }
-            onPress={() => {}}
-            last
-          />
-        </RowCard>
-
-        {/* ── 其他 ── */}
-        <SectionHeader title="其他" />
-        <RowCard>
-          <SettingRow label="数据导出" onPress={() => {}} />
-          <SettingRow label="帮助与反馈" onPress={() => {}} />
-          <SettingRow label="关于盈家" onPress={() => {}} last />
         </RowCard>
 
         {/* ── 退出登录 ── */}

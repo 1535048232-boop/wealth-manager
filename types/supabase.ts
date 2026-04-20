@@ -290,6 +290,28 @@ export interface Database {
         };
         Returns: boolean;
       };
+      get_family_invitation_by_code: {
+        Args: {
+          p_invite_code: string;
+        };
+        Returns: {
+          invitation_id: number;
+          family_id: number;
+          family_name: string;
+          family_avatar: string | null;
+          inviter_name: string | null;
+          expire_time: string;
+        }[];
+      };
+      accept_family_invitation_by_code: {
+        Args: {
+          p_invite_code: string;
+        };
+        Returns: {
+          member_id: number;
+          family_id: number;
+        }[];
+      };
     };
     Enums: Record<string, never>;
   };

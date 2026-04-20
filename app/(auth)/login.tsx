@@ -1,11 +1,17 @@
 import { useState } from 'react';
 import { View, Text, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity } from 'react-native';
-import { Link } from 'expo-router';
+import { type Href, Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 
+function toSafeHref(value: string): Href | null {
+  return value.startsWith('/') ? (value as Href) : null;
+}
+
 export default function LoginScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ redirectTo?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -29,6 +35,13 @@ export default function LoginScreen() {
       } else {
         setError(error.message);
       }
+      return;
+    }
+
+    const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : '';
+    const redirectHref = toSafeHref(redirectTo);
+    if (redirectHref) {
+      router.replace(redirectHref);
     }
   }
 
