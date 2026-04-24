@@ -2,6 +2,12 @@ import { create } from "zustand";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 
+function getAuthParamsFromUrl(url: string) {
+  const [baseAndQuery, hash = ""] = url.split("#");
+  const query = baseAndQuery.includes("?") ? baseAndQuery.split("?")[1] : "";
+  return new URLSearchParams([query, hash].filter(Boolean).join("&"));
+}
+
 interface AuthState {
   session: Session | null;
   user: User | null;
@@ -20,6 +26,12 @@ interface AuthState {
     password: string,
   ) => Promise<{ error: Error | null; needsConfirmation: boolean }>;
   resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>;
+  sendPasswordResetEmail: (
+    email: string,
+    redirectTo: string,
+  ) => Promise<{ error: Error | null }>;
+  recoverSessionFromUrl: (url: string) => Promise<{ error: Error | null }>;
+  updatePassword: (password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   setSession: (session: Session | null) => void;
 }
@@ -109,6 +121,43 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   resendConfirmationEmail: async (email: string) => {
     const { error } = await supabase.auth.resend({ type: "signup", email });
+    return { error };
+  },
+
+  sendPasswordResetEmail: async (email: string, redirectTo: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    return { error };
+  },
+
+  recoverSessionFromUrl: async (url: string) => {
+    const params = getAuthParamsFromUrl(url);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    const type = params.get("type");
+
+    if (type !== "recovery" || !accessToken || !refreshToken) {
+      return { error: new Error("重置链接无效或已过期，请重新申请") };
+    }
+
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (!error && data.session) {
+      set({ session: data.session, user: data.session.user });
+    }
+
+    return { error };
+  },
+
+  updatePassword: async (password: string) => {
+    const { data, error } = await supabase.auth.updateUser({ password });
+
+    if (!error && data.user) {
+      set({ user: data.user });
+    }
+
     return { error };
   },
 

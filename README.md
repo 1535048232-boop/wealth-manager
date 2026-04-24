@@ -39,7 +39,7 @@ RESEND_API_KEY=your-resend-api-key
 INVITE_EMAIL_FROM=Wealth App <noreply@your-domain.com>
 ```
 
-`EXPO_PUBLIC_WEB_BASE_URL` 用于生成 H5 邀请链接（如 `https://your-web-domain.com/invite?code=xxxx`），未配置时会自动回退到 App Deep Link（`myapp://invite?code=xxxx`）。
+`EXPO_PUBLIC_WEB_BASE_URL` 用于生成 H5 链接（如邀请链接、密码重置回跳地址）；未配置时会自动回退到 App Deep Link（如 `myapp://invite?code=xxxx`）。
 
 `APP_WEB_BASE_URL`、`APP_SCHEME`、`RESEND_API_KEY`、`INVITE_EMAIL_FROM` 用于 `send-family-invitation` Edge Function 发送邀请提醒邮件。
 若未配置邮件相关变量（`RESEND_API_KEY` / `INVITE_EMAIL_FROM`），邀请流程仍可使用，但会自动降级为手动分享邀请链接。
