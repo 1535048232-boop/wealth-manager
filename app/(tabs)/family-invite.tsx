@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
+import { Avatar } from '@/components/ui/Avatar';
 import { Colors } from '@/constants/Colors';
-import { APP_CONFIG } from '@/constants/config';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -13,15 +12,24 @@ interface InviteRow {
   id: number;
   invitee_contact: string;
   invitee_contact_type: 1 | 2;
-  invite_code: string;
+  invitee_user_id: string | null;
   status: 0 | 1 | -1;
-  last_send_time: string | null;
-  expire_time: string;
   created_at: string;
 }
 
-type MemberRole = 'member' | 'guest';
-type ContactMode = 'phone' | 'email';
+interface SearchAccountResult {
+  account_user_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  email: string | null;
+  phone: string | null;
+  matched_contact: string;
+  matched_contact_type: 1 | 2;
+  already_in_family: boolean;
+  pending_invitation: boolean;
+  active_family_name: string | null;
+  is_self: boolean;
+}
 
 interface InviterContext {
   memberId: number;
@@ -38,60 +46,33 @@ function generateInviteCode(length = 8): string {
   return code;
 }
 
-function validateContact(mode: ContactMode, value: string): string | null {
+function validateSearchQuery(value: string): string | null {
   const trimmed = value.trim();
-  if (!trimmed) return '请输入联系方式';
+  if (!trimmed) return '请输入邮箱或手机号';
 
-  if (mode === 'phone') {
-    if (!/^1\d{10}$/.test(trimmed)) return '请输入正确的11位手机号';
+  if (trimmed.includes('@')) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return '请输入正确的邮箱地址';
     return null;
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return '请输入正确的邮箱地址';
+  if (!/^1\d{10}$/.test(trimmed)) return '请输入正确的11位手机号';
   return null;
 }
 
 function formatStatus(status: 0 | 1 | -1): { label: string; color: string; bg: string } {
-  if (status === 1) return { label: '已接受', color: '#16A34A', bg: '#ECFDF5' };
-  if (status === -1) return { label: '已失效', color: '#DC2626', bg: '#FEF2F2' };
+  if (status === 1) return { label: '已加入', color: '#16A34A', bg: '#ECFDF5' };
+  if (status === -1) return { label: '已拒绝', color: '#DC2626', bg: '#FEF2F2' };
   return { label: '待确认', color: '#7C3AED', bg: '#F5F3FF' };
 }
 
-function buildInviteLink(inviteCode: string): string {
-  const webBaseUrl = APP_CONFIG.webBaseUrl?.trim();
-  if (webBaseUrl) {
-    const normalized = webBaseUrl.endsWith('/') ? webBaseUrl.slice(0, -1) : webBaseUrl;
-    return `${normalized}/invite?code=${encodeURIComponent(inviteCode)}`;
-  }
-
-  return Linking.createURL('/invite', {
-    queryParams: {
-      code: inviteCode,
-    },
-    scheme: 'myapp',
-  });
-}
-
-function formatDateTime(dateLike: string | null): string {
-  if (!dateLike) return '未发送提醒';
+function formatDateTime(dateLike: string): string {
   const date = new Date(dateLike);
-  if (Number.isNaN(date.getTime())) return '未发送提醒';
+  if (Number.isNaN(date.getTime())) return '时间未知';
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 
-interface SendInvitationResult {
-  sent: boolean;
-  channel: 'email' | 'none';
-  message: string;
-  fallback: 'none' | 'manual_share';
-}
-
-interface FunctionEnvelope<T> {
-  data: T | null;
-  error: {
-    code: string;
-    message: string;
-  } | null;
+function isMissingSearchRpcError(message: string): boolean {
+  return message.includes('search_invitable_account') && message.includes('no matches were found in the schema cache');
 }
 
 export default function FamilyInviteScreen() {
@@ -100,22 +81,16 @@ export default function FamilyInviteScreen() {
 
   const [context, setContext] = useState<InviterContext | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [contactMode, setContactMode] = useState<ContactMode>('phone');
-  const [contact, setContact] = useState('');
-  const [inviteRole, setInviteRole] = useState<MemberRole>('member');
-  const [showRoleMenu, setShowRoleMenu] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searchResult, setSearchResult] = useState<SearchAccountResult | null>(null);
+  const [searchAttempted, setSearchAttempted] = useState(false);
 
   const [recentInvites, setRecentInvites] = useState<InviteRow[]>([]);
-  const [sendingInvitationId, setSendingInvitationId] = useState<number | null>(null);
-  const isSharingRef = useRef(false);
 
   const isAdmin = context?.role === 'admin';
-
-  const contactLabel = useMemo(() => {
-    return contactMode === 'phone' ? '手机号' : '邮箱';
-  }, [contactMode]);
 
   async function loadInviterContext() {
     if (!user?.id) return;
@@ -154,7 +129,7 @@ export default function FamilyInviteScreen() {
     try {
       const { data, error } = await supabase
         .from('family_invitations')
-        .select('id, invitee_contact, invitee_contact_type, invite_code, status, last_send_time, expire_time, created_at')
+        .select('id, invitee_contact, invitee_contact_type, invitee_user_id, status, created_at')
         .eq('family_id', familyId)
         .order('created_at', { ascending: false })
         .limit(8);
@@ -175,163 +150,136 @@ export default function FamilyInviteScreen() {
     loadRecentInvites(context.familyId);
   }, [context?.familyId]);
 
-  async function triggerReminder(invitationId: number): Promise<{ ok: boolean; delivered: boolean; message: string }> {
-    try {
-      const { data, error } = await supabase.functions.invoke<FunctionEnvelope<SendInvitationResult>>('send-family-invitation', {
-        body: {
-          invitationId,
-        },
-      });
-
-      if (error) {
-        return { ok: false, delivered: false, message: error.message || '提醒发送失败，请稍后重试' };
-      }
-
-      if (data?.error) {
-        return { ok: false, delivered: false, message: data.error.message || '提醒发送失败，请稍后重试' };
-      }
-
-      if (!data?.data) {
-        return { ok: false, delivered: false, message: '提醒发送失败，请稍后重试' };
-      }
-
-      return {
-        ok: true,
-        delivered: data.data.sent,
-        message: data.data.message || (data.data.channel === 'email' ? '邮箱提醒已发送' : '提醒已处理'),
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '提醒发送失败，请稍后重试';
-      return { ok: false, delivered: false, message };
-    }
-  }
-
-  async function resendInvitation(item: InviteRow) {
-    if (!context || item.status !== 0 || sendingInvitationId) return;
-
-    if (item.invitee_contact_type !== 2) {
-      Alert.alert('暂不支持手机号自动提醒', '请使用“分享”按钮把邀请链接发送给对方');
-      return;
-    }
-
-    setSendingInvitationId(item.id);
-    try {
-      const result = await triggerReminder(item.id);
-      await loadRecentInvites(context.familyId);
-
-      if (!result.ok) {
-        Alert.alert('提醒发送失败', result.message);
-        return;
-      }
-
-      Alert.alert(result.delivered ? '提醒已发送' : '提醒未自动发送', result.message);
-    } finally {
-      setSendingInvitationId(null);
-    }
-  }
-
-  async function createInvitation(sendNow: boolean) {
+  async function handleSearchAccount() {
     if (!context) {
       Alert.alert('暂无家庭', '请先创建或加入家庭');
       return;
     }
 
     if (!isAdmin) {
-      Alert.alert('权限不足', '仅管理员可以发送邀请');
+      Alert.alert('权限不足', '仅管理员可以邀请成员');
       return;
     }
 
-    const validationError = validateContact(contactMode, contact);
+    const validationError = validateSearchQuery(query);
     if (validationError) {
       Alert.alert('输入有误', validationError);
       return;
     }
 
+    setSearching(true);
+    setSearchAttempted(true);
+    setSearchResult(null);
+
+    try {
+      const { data, error } = await supabase.rpc('search_invitable_account', {
+        p_query: query.trim(),
+      });
+
+      if (error) {
+        if (isMissingSearchRpcError(error.message)) {
+          Alert.alert('需要同步后端', '搜索账号能力对应的数据库迁移还未执行，先同步 Supabase migration 后即可使用。');
+          return;
+        }
+
+        throw error;
+      }
+
+      const first = Array.isArray(data) ? (data[0] as SearchAccountResult | undefined) : undefined;
+      setSearchResult(first ?? null);
+    } catch (error) {
+      console.error('[FamilyInviteScreen] handleSearchAccount failed:', error);
+      Alert.alert('搜索失败', error instanceof Error ? error.message : '请稍后重试');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleInviteAccount() {
+    if (!context || !searchResult) return;
+
+    if (searchResult.is_self) {
+      Alert.alert('无法邀请', '不能邀请自己加入当前家庭');
+      return;
+    }
+
+    if (searchResult.already_in_family) {
+      Alert.alert('无需邀请', '该账号已经在当前家庭中');
+      return;
+    }
+
+    if (searchResult.pending_invitation) {
+      Alert.alert('已发送邀请', '该账号已有待处理邀请，请等待对方确认');
+      return;
+    }
+
+    if (searchResult.active_family_name) {
+      Alert.alert('暂不可邀请', `该账号当前已在“${searchResult.active_family_name}”家庭中`);
+      return;
+    }
+
     setSaving(true);
     try {
-      const normalizedContact = contact.trim();
-      let createdCode = '';
-      let createdInvitationId: number | null = null;
+      let created = false;
 
       for (let i = 0; i < 5; i += 1) {
         const nextCode = generateInviteCode(8);
-        const { data, error } = await supabase
-          .from('family_invitations')
-          .insert({
-            family_id: context.familyId,
-            inviter_id: context.memberId,
-            invitee_contact: normalizedContact,
-            invitee_contact_type: contactMode === 'phone' ? 1 : 2,
-            invite_code: nextCode,
-            last_send_time: null,
-            status: 0,
-          })
-          .select('id, invite_code')
-          .single();
+        const { error } = await supabase.from('family_invitations').insert({
+          family_id: context.familyId,
+          inviter_id: context.memberId,
+          invitee_user_id: searchResult.account_user_id,
+          invitee_contact: searchResult.matched_contact,
+          invitee_contact_type: searchResult.matched_contact_type,
+          invite_code: nextCode,
+          last_send_time: null,
+          status: 0,
+        });
 
-        if (!error && data) {
-          createdCode = data.invite_code;
-          createdInvitationId = data.id;
+        if (!error) {
+          created = true;
           break;
         }
 
         if (error.code !== '23505') throw error;
       }
 
-      if (!createdCode) {
-        Alert.alert('操作失败', '邀请码生成冲突，请重试');
+      if (!created) {
+        Alert.alert('操作失败', '邀请创建冲突，请重试');
         return;
       }
 
-      let reminderMessage = '你可稍后手动分享邀请链接';
-      if (sendNow && createdInvitationId) {
-        if (contactMode === 'email') {
-          const result = await triggerReminder(createdInvitationId);
-          reminderMessage = result.ok ? result.message : `提醒发送失败：${result.message}`;
-        } else {
-          reminderMessage = '手机号暂不支持自动提醒，请点击“分享”发送邀请链接';
-        }
-      }
-
-      setContact('');
-      setShowRoleMenu(false);
+      setQuery('');
+      setSearchAttempted(false);
+      setSearchResult(null);
       await loadRecentInvites(context.familyId);
 
       Alert.alert(
-        sendNow ? '邀请已创建' : '邀请码已生成',
-        `邀请码：${createdCode}\n被邀方式：${contactLabel}\n角色：${inviteRole === 'member' ? '普通成员' : '受限成员'}\n提醒状态：${reminderMessage}`,
+        '邀请已发送',
+        `已向 ${searchResult.display_name?.trim() || searchResult.matched_contact} 发出邀请，对方会在应用内收到“加入家庭”的确认弹窗。`,
       );
     } catch (error) {
-      console.error('[FamilyInviteScreen] createInvitation failed:', error);
-      Alert.alert('操作失败', '邀请创建失败，请稍后重试');
+      console.error('[FamilyInviteScreen] handleInviteAccount failed:', error);
+      Alert.alert('操作失败', '邀请发送失败，请稍后重试');
     } finally {
       setSaving(false);
     }
   }
 
-  async function shareInviteLink(item: InviteRow) {
-    if (item.status !== 0) {
-      Alert.alert('该邀请不可分享', '仅待确认状态的邀请支持分享链接');
-      return;
-    }
+  const canInviteSelected =
+    !!searchResult &&
+    !searchResult.is_self &&
+    !searchResult.already_in_family &&
+    !searchResult.pending_invitation &&
+    !searchResult.active_family_name;
 
-    if (isSharingRef.current) return;
-    isSharingRef.current = true;
+  const matchedContactLabel =
+    searchResult?.matched_contact_type === 1 ? `手机号 ${searchResult.matched_contact}` : `邮箱 ${searchResult?.matched_contact ?? ''}`;
 
-    const inviteLink = buildInviteLink(item.invite_code);
-
-    try {
-      await Share.share({
-        title: '家庭邀请链接',
-        message: `邀请你加入我的家庭账本\n邀请码：${item.invite_code}\n邀请链接：${inviteLink}`,
-      });
-    } catch (error) {
-      console.error('[FamilyInviteScreen] shareInviteLink failed:', error);
-      Alert.alert('分享失败', '请稍后重试');
-    } finally {
-      isSharingRef.current = false;
-    }
-  }
+  let searchHint = '';
+  if (searchResult?.is_self) searchHint = '这是你自己的账号';
+  if (searchResult?.already_in_family) searchHint = '该账号已经在当前家庭中';
+  if (searchResult?.pending_invitation) searchHint = '该账号已有待处理邀请';
+  if (searchResult?.active_family_name) searchHint = `该账号当前在“${searchResult.active_family_name}”家庭中`;
 
   return (
     <ScreenWrapper className="bg-app-bg">
@@ -361,108 +309,77 @@ export default function FamilyInviteScreen() {
             elevation: 2,
           }}
         >
-          <View className="rounded-full p-1 flex-row" style={{ backgroundColor: '#EEF0FF' }}>
-            <TouchableOpacity
-              className="flex-1 py-2.5 rounded-full items-center"
-              style={{ backgroundColor: contactMode === 'phone' ? Colors.primaryLight : 'transparent' }}
-              onPress={() => setContactMode('phone')}
-            >
-              <Text className="text-base font-semibold" style={{ color: contactMode === 'phone' ? '#fff' : Colors.text.secondary }}>
-                手机号
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="flex-1 py-2.5 rounded-full items-center"
-              style={{ backgroundColor: contactMode === 'email' ? Colors.primaryLight : 'transparent' }}
-              onPress={() => setContactMode('email')}
-            >
-              <Text className="text-base font-semibold" style={{ color: contactMode === 'email' ? '#fff' : Colors.text.secondary }}>
-                邮箱
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View className="mt-4 rounded-2xl border px-4" style={{ borderColor: '#E7E4FF', backgroundColor: 'rgba(255,255,255,0.7)' }}>
+          <View className="rounded-2xl border px-4" style={{ borderColor: '#E7E4FF', backgroundColor: 'rgba(255,255,255,0.7)' }}>
             <TextInput
-              value={contact}
-              onChangeText={setContact}
-              placeholder={contactMode === 'phone' ? '输入手机号' : '输入邮箱'}
+              value={query}
+              onChangeText={(nextValue) => {
+                setQuery(nextValue);
+                setSearchResult(null);
+                setSearchAttempted(false);
+              }}
+              placeholder="输入邮箱或手机号"
               placeholderTextColor="#A3A3B7"
               className="py-3.5 text-base"
-              keyboardType={contactMode === 'phone' ? 'numeric' : 'email-address'}
+              keyboardType="email-address"
               autoCapitalize="none"
+              onSubmitEditing={handleSearchAccount}
             />
           </View>
 
-          <View className="mt-4">
-            {/* <TouchableOpacity
-              className="rounded-2xl border px-4 py-3.5 flex-row items-center justify-between"
-              style={{ borderColor: '#E7E4FF', backgroundColor: 'rgba(255,255,255,0.7)' }}
-              onPress={() => setShowRoleMenu((prev) => !prev)}
-            >
-              <Text className="text-base" style={{ color: Colors.text.primary }}>
-                被邀请人角色  {inviteRole === 'member' ? '普通成员' : '受限成员'}
-              </Text>
-              <MaterialCommunityIcons name={showRoleMenu ? 'chevron-up' : 'chevron-down'} size={20} color={Colors.text.secondary} />
-            </TouchableOpacity> */}
-
-            {showRoleMenu ? (
-              <View className="mt-2 rounded-2xl border overflow-hidden" style={{ borderColor: '#E7E4FF', backgroundColor: '#FFFFFF' }}>
+          {searchResult ? (
+            <View className="mt-4 rounded-2xl border p-3" style={{ borderColor: '#E7E4FF', backgroundColor: '#FFFFFF' }}>
+              <Text className="text-xs font-semibold mb-3" style={{ color: Colors.text.tertiary }}>搜索结果</Text>
+              <View className="flex-row items-center">
+                <Avatar uri={searchResult.avatar_url} name={searchResult.display_name ?? searchResult.matched_contact} size="md" />
+                <View className="flex-1 ml-3">
+                  <Text className="text-base font-semibold" style={{ color: Colors.text.primary }}>
+                    {searchResult.display_name?.trim() || '未设置昵称'}
+                  </Text>
+                  <Text className="text-sm mt-1" style={{ color: Colors.text.secondary }}>
+                    {matchedContactLabel}
+                  </Text>
+                  {searchHint ? (
+                    <Text className="text-xs mt-1" style={{ color: '#B45309' }}>
+                      {searchHint}
+                    </Text>
+                  ) : null}
+                </View>
                 <TouchableOpacity
-                  className="px-4 py-3"
-                  style={{ backgroundColor: inviteRole === 'member' ? '#F5F3FF' : '#FFFFFF' }}
-                  onPress={() => {
-                    setInviteRole('member');
-                    setShowRoleMenu(false);
-                  }}
+                  className="rounded-full px-4 py-2"
+                  style={{ backgroundColor: Colors.primary, opacity: canInviteSelected && !saving ? 1 : 0.45 }}
+                  onPress={handleInviteAccount}
+                  disabled={!canInviteSelected || saving}
                 >
-                  <Text className="text-base" style={{ color: Colors.text.primary }}>普通成员</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  className="px-4 py-3 border-t"
-                  style={{ borderColor: '#F1EEFF', backgroundColor: inviteRole === 'guest' ? '#F5F3FF' : '#FFFFFF' }}
-                  onPress={() => {
-                    setInviteRole('guest');
-                    setShowRoleMenu(false);
-                  }}
-                >
-                  <Text className="text-base" style={{ color: Colors.text.primary }}>受限成员</Text>
+                  <Text className="text-sm font-semibold text-white">{saving ? '添加中' : '添加'}</Text>
                 </TouchableOpacity>
               </View>
-            ) : null}
+            </View>
+          ) : null}
 
-            {/* <Text className="text-xs mt-2" style={{ color: Colors.text.tertiary }}>
-              当前底表未存储角色字段，角色用于本次邀请提示展示。
-            </Text> */}
-          </View>
+          {!searchResult && searchAttempted && !searching ? (
+            <View className="mt-4 rounded-2xl border px-4 py-3" style={{ borderColor: '#F1EEFF', backgroundColor: '#FFFFFF' }}>
+              <Text className="text-sm" style={{ color: Colors.text.secondary }}>没有找到对应账号，请确认邮箱或手机号是否正确。</Text>
+            </View>
+          ) : null}
         </View>
 
         <View className="mx-4 mt-5">
           <TouchableOpacity
             className="rounded-full py-3.5 items-center"
-            style={{ backgroundColor: Colors.primary, opacity: !isAdmin || saving ? 0.6 : 1 }}
-            onPress={() => createInvitation(true)}
-            disabled={!isAdmin || saving || loading}
+            style={{ backgroundColor: Colors.primary, opacity: !isAdmin || searching || loading ? 0.6 : 1 }}
+            onPress={handleSearchAccount}
+            disabled={!isAdmin || searching || loading}
           >
-            <Text className="text-lg font-semibold text-white">创建并尝试发送提醒</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            className="rounded-full py-3.5 items-center mt-3 border"
-            style={{ borderColor: '#D9D6FF', backgroundColor: 'rgba(255,255,255,0.8)', opacity: !isAdmin || saving ? 0.6 : 1 }}
-            onPress={() => createInvitation(false)}
-            disabled={!isAdmin || saving || loading}
-          >
-            <Text className="text-lg font-semibold" style={{ color: Colors.text.primary }}>生成邀请码</Text>
+            <Text className="text-lg font-semibold text-white">{searching ? '搜索中...' : '搜索账号'}</Text>
           </TouchableOpacity>
 
           {!isAdmin ? (
             <Text className="text-xs mt-2 text-center" style={{ color: '#DC2626' }}>
-              仅家庭管理员可创建邀请
+              仅家庭管理员可邀请成员
             </Text>
           ) : (
             <Text className="text-xs mt-2 text-center" style={{ color: Colors.text.tertiary }}>
-              若自动提醒不可用，将自动降级为手动分享邀请链接
+              搜索到账号后，可直接发起家庭邀请
             </Text>
           )}
         </View>
@@ -476,48 +393,21 @@ export default function FamilyInviteScreen() {
             <View className="mt-3">
               {recentInvites.map((item) => {
                 const statusMeta = formatStatus(item.status);
-                const contactTypeLabel = item.invitee_contact_type === 1 ? '手机' : '邮箱';
                 return (
                   <View key={item.id} className="rounded-2xl px-3 py-3 mb-2" style={{ backgroundColor: '#FFFFFF' }}>
                     <View className="flex-row items-center justify-between">
-                      <Text className="text-sm font-semibold" style={{ color: Colors.text.primary }}>
+                      <Text className="text-sm font-semibold flex-1 pr-3" style={{ color: Colors.text.primary }}>
                         {item.invitee_contact}
                       </Text>
-                      <View className="flex-row items-center">
-                        <TouchableOpacity
-                          className="px-2.5 py-1 rounded-full mr-2 flex-row items-center"
-                          style={{ backgroundColor: '#EEF0FF' }}
-                          onPress={() => shareInviteLink(item)}
-                        >
-                          <MaterialCommunityIcons name="share-variant" size={12} color={Colors.primary} />
-                          <Text className="text-xs font-semibold ml-1" style={{ color: Colors.primary }}>分享</Text>
-                        </TouchableOpacity>
-                        {item.status === 0 && item.invitee_contact_type === 2 ? (
-                          <TouchableOpacity
-                            className="px-2.5 py-1 rounded-full mr-2 flex-row items-center"
-                            style={{ backgroundColor: '#ECFDF5', opacity: sendingInvitationId === item.id ? 0.65 : 1 }}
-                            onPress={() => resendInvitation(item)}
-                            disabled={sendingInvitationId !== null}
-                          >
-                            <MaterialCommunityIcons name="bell-ring-outline" size={12} color="#16A34A" />
-                            <Text className="text-xs font-semibold ml-1" style={{ color: '#16A34A' }}>
-                              {sendingInvitationId === item.id ? '发送中' : '提醒'}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : null}
-                        <View className="px-2 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
-                          <Text className="text-xs font-semibold" style={{ color: statusMeta.color }}>{statusMeta.label}</Text>
-                        </View>
+                      <View className="px-2 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
+                        <Text className="text-xs font-semibold" style={{ color: statusMeta.color }}>{statusMeta.label}</Text>
                       </View>
                     </View>
-                    <Text className="text-xs mt-1" style={{ color: Colors.text.secondary }}>
-                      {contactTypeLabel} | 邀请码 {item.invite_code}
+                    <Text className="text-xs mt-2" style={{ color: Colors.text.secondary }}>
+                      {item.invitee_contact_type === 1 ? '手机号账号' : '邮箱账号'}
                     </Text>
-                    <Text className="text-xs mt-1" style={{ color: Colors.text.secondary }}>
-                      最近提醒 {formatDateTime(item.last_send_time)}
-                    </Text>
-                    <Text className="text-xs mt-1" numberOfLines={1} style={{ color: Colors.text.tertiary }}>
-                      链接 {buildInviteLink(item.invite_code)}
+                    <Text className="text-xs mt-1" style={{ color: Colors.text.tertiary }}>
+                      邀请时间 {formatDateTime(item.created_at)}
                     </Text>
                   </View>
                 );
