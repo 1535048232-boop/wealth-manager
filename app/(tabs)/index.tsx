@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Avatar } from '@/components/ui/Avatar';
 import { Colors } from '@/constants/Colors';
-import { useHomeData, type AssetSegmentData, type MemberSummary } from '@/hooks/useHomeData';
+import { useHomeData, type AssetSegmentData, type HomeTrendPoint, type MemberSummary } from '@/hooks/useHomeData';
 
 // ─── Donut chart helpers ────────────────────────────────────────────────────
 
@@ -59,6 +59,102 @@ function formatAmount(n: number) {
   }
 
   return n < 0 ? `-${result}` : result;
+}
+
+function buildLinePath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return '';
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+}
+
+function HomeAssetTrendChart({ points, width }: { points: HomeTrendPoint[]; width: number }) {
+  const chartHeight = 112;
+  const valueLabelWidth = 56;
+  const maxValue = Math.max(...points.map((point) => point.totalAmount), 0);
+
+  if (points.length === 0 || maxValue <= 0) {
+    return null;
+  }
+
+  const xStep = points.length === 1 ? 0 : width / (points.length - 1);
+  const chartPoints = points.map((point, index) => ({
+    x: index * xStep,
+    y: chartHeight - (point.totalAmount / maxValue) * chartHeight,
+  }));
+
+  return (
+    <View style={{ marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: Colors.border }}>
+      <View className="flex-row items-center justify-between mb-2">
+        <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text.primary }}>家庭总资产趋势</Text>
+        <Text style={{ fontSize: 11, color: Colors.text.tertiary }}>近6个月</Text>
+      </View>
+
+      <View style={{ position: 'relative', width, height: chartHeight }}>
+        {chartPoints.map((point, index) => {
+          const labelLeft = Math.max(0, Math.min(point.x - valueLabelWidth / 2, width - valueLabelWidth));
+          const labelTop = Math.max(0, point.y - 24);
+
+          return (
+            <View
+              key={`${points[index].label}-value`}
+              pointerEvents="none"
+              className="rounded-full px-2 py-0.5"
+              style={{
+                position: 'absolute',
+                left: labelLeft,
+                top: labelTop,
+                width: valueLabelWidth,
+                backgroundColor: index === chartPoints.length - 1 ? Colors.primary : '#FFFFFF',
+                borderWidth: 1,
+                borderColor: index === chartPoints.length - 1 ? Colors.primary : Colors.border,
+                alignItems: 'center',
+                zIndex: 2,
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
+                style={{
+                  fontSize: 9,
+                  fontWeight: '700',
+                  color: index === chartPoints.length - 1 ? '#FFFFFF' : Colors.text.primary,
+                }}
+              >
+                ¥{formatAmount(points[index].totalAmount)}
+              </Text>
+            </View>
+          );
+        })}
+
+        <Svg width={width} height={chartHeight}>
+          {[0, 0.5, 1].map((ratio) => {
+            const y = chartHeight - ratio * chartHeight;
+            return <Path key={ratio} d={`M 0 ${y.toFixed(1)} L ${width.toFixed(1)} ${y.toFixed(1)}`} stroke="#E5E7EB" strokeDasharray="4 4" />;
+          })}
+          <Path d={buildLinePath(chartPoints)} fill="none" stroke={Colors.primary} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+          {chartPoints.map((point, index) => (
+            <Circle
+              key={points[index].label}
+              cx={point.x}
+              cy={point.y}
+              r={index === chartPoints.length - 1 ? 4.5 : 3}
+              fill={index === chartPoints.length - 1 ? Colors.primary : '#FFFFFF'}
+              stroke={Colors.primary}
+              strokeWidth={2}
+            />
+          ))}
+        </Svg>
+      </View>
+
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+        {points.map((point) => (
+          <Text key={point.label} style={{ fontSize: 11, color: Colors.text.tertiary }}>
+            {point.label}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
 }
 
 // ─── Donut chart component ───────────────────────────────────────────────────
@@ -169,6 +265,7 @@ function MemberCard({ member, compact = false }: { member: MemberSummary; compac
 
 export default function HomeScreen() {
   const { width } = useWindowDimensions();
+  const router = useRouter();
   const greeting = getGreeting();
   const dateLabel = getDateLabel();
   const { data, isLoading, error, refetch } = useHomeData();
@@ -181,6 +278,7 @@ export default function HomeScreen() {
 
   const RIGHT_LEGEND_LIMIT = 5;
   const isNarrowScreen = width < 390;
+  const homeTrendChartWidth = Math.max(width - 68, 220);
 
   return (
     <ScreenWrapper className="bg-app-bg">
@@ -217,7 +315,10 @@ export default function HomeScreen() {
           <>
             {/* Main asset card */}
             <View className="mx-4">
-              <View
+              <TouchableOpacity
+                activeOpacity={0.92}
+                onPress={() => router.push('/(tabs)/family-members')}
+                accessibilityLabel="查看家庭成员资产详情"
                 style={{
                   backgroundColor: Colors.surface,
                   borderRadius: 20,
@@ -334,7 +435,9 @@ export default function HomeScreen() {
                     </View>
                   )}
                 </View>
-              </View>
+
+                <HomeAssetTrendChart points={data.trendPoints} width={homeTrendChartWidth} />
+              </TouchableOpacity>
             </View>
 
             {/* Member cards */}

@@ -202,6 +202,13 @@ export default function TabLayout() {
             title: '邀请成员',
           }}
         />
+        <Tabs.Screen
+          name="family-members"
+          options={{
+            href: null,
+            title: '家庭成员',
+          }}
+        />
       </Tabs>
 
       <FamilyInvitationPromptModal

@@ -17,6 +17,11 @@ export interface AssetSegmentData {
   color: string;
 }
 
+export interface HomeTrendPoint {
+  label: string;
+  totalAmount: number;
+}
+
 export interface HomeData {
   totalAssets: number;
   monthGrowth: number;
@@ -24,6 +29,13 @@ export interface HomeData {
   disposablePercent: number;
   members: MemberSummary[];
   segments: AssetSegmentData[];
+  trendPoints: HomeTrendPoint[];
+}
+
+interface SnapshotRow {
+  account_id: number;
+  snapshot_date: string;
+  amount: number;
 }
 
 // Colors assigned to each account_type
@@ -43,6 +55,28 @@ const TYPE_COLORS: Record<string, string> = {
 // Types that are generally locked / non-disposable
 const LOCKED_TYPES = new Set(['公积金', '期权']);
 
+function getMonthEnd(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function getMonthLabel(date: Date) {
+  return `${date.getMonth() + 1}月`;
+}
+
+function getValueAtDate(snapshots: SnapshotRow[], dateText: string) {
+  let lastAmount = 0;
+
+  for (const snapshot of snapshots) {
+    if (snapshot.snapshot_date <= dateText) {
+      lastAmount = Number(snapshot.amount);
+    } else {
+      break;
+    }
+  }
+
+  return lastAmount;
+}
+
 export function useHomeData() {
   const { user } = useAuthStore();
   const profileVersion = useAppStore((state) => state.profileVersion);
@@ -56,8 +90,8 @@ export function useHomeData() {
     try {
       const today = new Date();
       const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-      // Fetch snapshots starting from the previous month so we have start-of-month baseline
-      const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+      const trendStart = new Date(today.getFullYear(), today.getMonth() - 5, 1);
+      const trendStartText = trendStart
         .toISOString()
         .split('T')[0];
 
@@ -74,8 +108,8 @@ export function useHomeData() {
         supabase
           .from('asset_daily_snapshots')
           .select('account_id, snapshot_date, amount')
-          .gte('snapshot_date', prevMonthStart)
-          .order('snapshot_date', { ascending: false }),
+          .gte('snapshot_date', trendStartText)
+          .order('snapshot_date', { ascending: true }),
       ]);
 
       if (membersRes.error) throw membersRes.error;
@@ -84,7 +118,7 @@ export function useHomeData() {
 
       const familyMembers = membersRes.data ?? [];
       const accounts = accountsRes.data ?? [];
-      const snapshots = snapshotsRes.data ?? [];
+      const snapshots = (snapshotsRes.data ?? []) as SnapshotRow[];
 
       // Fetch profiles for members that have a user_id
       const userIds = familyMembers
@@ -106,19 +140,20 @@ export function useHomeData() {
       );
 
       // Build amount per account using each account's own latest snapshot.
-      // snapshots are already ordered by snapshot_date DESC, so the first
-      // occurrence for an account is its latest known amount.
       const latestByAccount = new Map<number, number>();
       const startOfMonthByAccount = new Map<number, number>();
+      const snapshotsByAccount = new Map<number, SnapshotRow[]>();
 
       for (const snap of snapshots) {
-        if (!latestByAccount.has(snap.account_id)) {
-          latestByAccount.set(snap.account_id, Number(snap.amount));
-        }
+        latestByAccount.set(snap.account_id, Number(snap.amount));
+
+        const existingSnapshots = snapshotsByAccount.get(snap.account_id) ?? [];
+        existingSnapshots.push(snap);
+        snapshotsByAccount.set(snap.account_id, existingSnapshots);
       }
 
       // For start-of-month baseline: iterate ascending, keep last value <= firstOfMonth
-      for (const snap of [...snapshots].reverse()) {
+      for (const snap of snapshots) {
         if (snap.snapshot_date <= firstOfMonth) {
           startOfMonthByAccount.set(snap.account_id, Number(snap.amount));
         }
@@ -155,6 +190,29 @@ export function useHomeData() {
         startTotal += amount;
       }
       const monthGrowth = totalAssets - startTotal;
+
+      const trendMonths = Array.from({ length: 6 }, (_, index) => {
+        const date = new Date();
+        date.setMonth(date.getMonth() - (5 - index));
+        const pointDate = index === 5 ? new Date() : getMonthEnd(date);
+        return {
+          label: getMonthLabel(date),
+          dateText: pointDate.toISOString().split('T')[0],
+        };
+      });
+
+      const trendPoints: HomeTrendPoint[] = trendMonths.map((month) => {
+        let totalAmount = 0;
+
+        for (const account of accounts) {
+          totalAmount += getValueAtDate(snapshotsByAccount.get(account.id) ?? [], month.dateText);
+        }
+
+        return {
+          label: month.label,
+          totalAmount,
+        };
+      });
 
       // Disposable
       const disposableAmount = totalAssets - lockedAmount;
@@ -201,6 +259,7 @@ export function useHomeData() {
         disposablePercent,
         members,
         segments,
+        trendPoints,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '加载失败';
