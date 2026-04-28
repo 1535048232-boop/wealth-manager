@@ -91,8 +91,8 @@ function SettingRow({
       className={`flex-row items-center px-4 py-3.5 ${!last ? 'border-b border-gray-50' : ''}`}
     >
       <View className="flex-1">
-        <Text className="text-sm font-medium text-gray-900">{label}</Text>
-        {sublabel ? <Text className="text-xs text-gray-400 mt-0.5">{sublabel}</Text> : null}
+        <Text className="text-[14px] font-medium text-gray-900">{label}</Text>
+        {sublabel ? <Text className="text-[14px] text-gray-400 mt-0.5">{sublabel}</Text> : null}
       </View>
       {value}
       {onPress ? (
@@ -417,7 +417,7 @@ export default function ProfileScreen() {
 
         {/* ── Header ── */}
         <View className="flex-row items-center justify-between px-5 pt-4 pb-2">
-          <Text className="text-2xl font-bold text-gray-900">设置</Text>
+          <Text className="text-[22px] font-bold text-gray-900">设置</Text>
           <Avatar uri={profile?.avatar_url} name={hasAvatar ? displayName : undefined} showCamera={!hasAvatar} size="md" />
         </View>
 
@@ -438,7 +438,12 @@ export default function ProfileScreen() {
         </View>
 
         {/* ── 家庭管理 ── */}
-        <SectionHeader title="家庭管理" />
+        <Text
+          className="font-semibold text-gray-400 uppercase tracking-widest px-5 pt-6 pb-2"
+          style={{ fontSize: 14 }}
+        >
+          家庭管理
+        </Text>
         <RowCard>
           <SettingRow
             label={family ? '家庭设置' : '创建家庭'}
@@ -587,12 +592,12 @@ export default function ProfileScreen() {
         onRequestClose={() => setShowFamilyMembers(false)}
       >
         <View style={{ flex: 1, backgroundColor: '#E9E8FF' }}>
-          <View className="px-5" style={{ paddingTop: Platform.OS === 'ios' ? 58 : 24, paddingBottom: 10 }}>
+          <View className="px-5" style={{ paddingTop: 48, paddingBottom: 10 }}>
             <View className="flex-row items-center justify-between">
               <TouchableOpacity onPress={() => setShowFamilyMembers(false)} className="w-9 h-9 rounded-full items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.45)' }}>
                 <Text className="text-gray-500 text-xl">‹</Text>
               </TouchableOpacity>
-              <Text className="text-[28px] font-bold text-gray-900">家庭成员</Text>
+              <Text className="text-[22px] font-bold text-gray-900">家庭成员</Text>
               {canInviteFamilyMembers ? (
                 <TouchableOpacity
                   className="px-4 py-2 rounded-full"
@@ -677,15 +682,12 @@ export default function ProfileScreen() {
                       </View>
 
                       <View className="flex-row items-center mt-1.5">
-                        <View className="flex-row items-center mr-3">
-                          <MaterialCommunityIcons name={sourceMeta.icon as any} size={13} color="#9CA3AF" />
-                          <Text className="text-xs text-gray-400 ml-1">{sourceMeta.label}</Text>
-                        </View>
-
-                        <View className="flex-row items-center mr-3">
-                          <MaterialCommunityIcons name="account-arrow-right" size={13} color="#9CA3AF" />
-                          <Text className="text-xs text-gray-400 ml-1">邀请</Text>
-                        </View>
+                        {canInviteFamilyMembers ? (
+                          <View className="flex-row items-center mr-3">
+                            <MaterialCommunityIcons name={sourceMeta.icon as any} size={13} color="#9CA3AF" />
+                            <Text className="text-xs text-gray-400 ml-1">{sourceMeta.label}</Text>
+                          </View>
+                        ) : null}
 
                         <View className="flex-row items-center">
                           <MaterialCommunityIcons name={statusMeta.icon as any} size={13} color={statusMeta.color} />
@@ -707,16 +709,19 @@ export default function ProfileScreen() {
               })
             )}
 
-            <View className="mt-1 mb-2 px-1 flex-row items-center justify-between">
-              <Text className="text-sm font-semibold text-gray-600">邀请记录</Text>
-              {familyInvitationsLoading ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : (
-                <Text className="text-xs text-gray-400">共 {familyInvitations.length} 条</Text>
-              )}
-            </View>
+            {canInviteFamilyMembers ? (
+              <View className="mt-1 mb-2 px-1 flex-row items-center justify-between">
+                <Text className="text-sm font-semibold text-gray-600">邀请记录</Text>
+                {familyInvitationsLoading ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Text className="text-xs text-gray-400">共 {familyInvitations.length} 条</Text>
+                )}
+              </View>
+            ) : null}
 
-            {!familyInvitationsLoading && familyInvitations.length === 0 ? (
+            {canInviteFamilyMembers ? (
+              !familyInvitationsLoading && familyInvitations.length === 0 ? (
               <View
                 className="rounded-3xl px-4 py-5"
                 style={{
@@ -745,17 +750,10 @@ export default function ProfileScreen() {
                   >
                     <View className="flex-row items-start justify-between">
                       <View className="flex-1 pr-3">
-                        <View className="flex-row items-center flex-wrap">
-                          <Text className="text-xl font-semibold text-gray-800 mr-2">
-                            邀请人: {invitation.inviterDisplayName ?? '未知成员'}
-                            {getRoleLabel(invitation.inviterRole) ? `（${getRoleLabel(invitation.inviterRole)}）` : ''}
-                          </Text>
-                          <View className="px-2.5 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
-                            <Text className="text-[11px] font-semibold" style={{ color: statusMeta.color }}>
-                              {statusMeta.label}
-                            </Text>
-                          </View>
-                        </View>
+                        <Text className="text-[15px] font-semibold text-gray-800">
+                          邀请人: {invitation.inviterDisplayName ?? '未知成员'}
+                          {getRoleLabel(invitation.inviterRole) ? `（${getRoleLabel(invitation.inviterRole)}）` : ''}
+                        </Text>
 
                         <Text className="text-sm text-gray-600 mt-2">
                           发送时间: {sendTimeText}
@@ -770,8 +768,13 @@ export default function ProfileScreen() {
                         </Text>
                       </View>
 
-                      {invitation.inviterId === currentMemberId ? (
+                      {invitation.inviterId === currentMemberId && statusMeta.actionable ? (
                         <View>
+                          <View className="self-end px-2.5 py-1 rounded-full mb-2" style={{ backgroundColor: statusMeta.bg }}>
+                            <Text className="text-[11px] font-semibold" style={{ color: statusMeta.color }}>
+                              {statusMeta.label}
+                            </Text>
+                          </View>
                           <TouchableOpacity
                             className="px-3.5 py-2 rounded-full mb-2"
                             style={{ backgroundColor: '#FFFFFF' }}
@@ -796,12 +799,19 @@ export default function ProfileScreen() {
                             <Text className="text-sm font-semibold text-gray-700">撤销邀请</Text>
                           </TouchableOpacity>
                         </View>
-                      ) : null}
+                      ) : (
+                        <View className="px-2.5 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
+                          <Text className="text-[11px] font-semibold" style={{ color: statusMeta.color }}>
+                            {statusMeta.label}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 );
               })
-            )}
+            )
+            ) : null}
           </ScrollView>
         </View>
       </Modal>

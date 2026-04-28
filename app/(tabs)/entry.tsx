@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -83,6 +84,7 @@ const QUADRANT_META: Record<DbAssetQuadrant, { short: string; color: string; bg:
 export default function EntryScreen() {
   const { user } = useAuthStore();
   const profileVersion = useAppStore((state) => state.profileVersion);
+  const insets = useSafeAreaInsets();
 
   const [accounts, setAccounts]               = useState<AccountItem[]>([]);
   const [members, setMembers]                 = useState<MemberInfo[]>([]);
@@ -474,7 +476,7 @@ export default function EntryScreen() {
   return (
     <ScreenWrapper>
       {/* ── Page title ── */}
-      <View style={styles.pageHeader}>
+      <View style={[styles.pageHeader, { paddingTop: 16 + Math.min(insets.top, 16) }]}>
         <Text style={styles.pageTitle}>录入</Text>
         <Text style={styles.pageSubtitle}>点击账户录入今日金额</Text>
       </View>

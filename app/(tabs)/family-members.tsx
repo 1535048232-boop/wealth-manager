@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Avatar } from '@/components/ui/Avatar';
@@ -173,7 +174,7 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
   if (data.trendPoints.length === 0 || maxValue <= 0) {
     return (
       <View className="rounded-3xl px-5 py-6" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border }}>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
+        <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
         <Text style={{ fontSize: 13, color: Colors.text.secondary, marginTop: 10 }}>暂无趋势数据</Text>
       </View>
     );
@@ -181,7 +182,7 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
 
   return (
     <View className="rounded-3xl px-5 py-5" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border }}>
-      <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
+      <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
 
       <View className="flex-row items-center flex-wrap mt-3 mb-3">
         {data.memberCards.map((member) => (
@@ -356,10 +357,10 @@ function MemberWealthCard({ member }: { member: FamilyMemberCardData }) {
           </View>
 
           <View className="ml-3 flex-1 min-w-0">
-            <Text style={{ fontSize: 11, color: Colors.text.secondary }}>总个人财富</Text>
+            <Text style={{ fontSize: 12, color: Colors.text.secondary }}>总个人财富</Text>
             <Text
               numberOfLines={1}
-              style={{ fontSize: 16, fontWeight: '700', color: Colors.text.primary, marginTop: 6, lineHeight: 19 }}
+              style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary, marginTop: 6, lineHeight: 19 }}
             >
               {member.displayName}
             </Text>
@@ -371,7 +372,7 @@ function MemberWealthCard({ member }: { member: FamilyMemberCardData }) {
             numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={0.7}
-            style={{ fontSize: 28, fontWeight: '800', color: Colors.primary, letterSpacing: -1, lineHeight: 34 }}
+            style={{ fontSize: 22, fontWeight: '800', color: Colors.primary, letterSpacing: -0.5, lineHeight: 28 }}
           >
             ¥{formatAmount(member.totalAmount)}
           </Text>
@@ -556,12 +557,16 @@ function useFamilyMembersAnalytics() {
 
 export default function FamilyMembersScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { data, isLoading, error } = useFamilyMembersAnalytics();
 
   return (
     <ScreenWrapper className="bg-app-bg">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
-        <View className="px-5 pt-4 pb-3 flex-row items-center justify-between">
+        <View
+          className="px-5 pb-3 flex-row items-center justify-between"
+          style={{ paddingTop: 48 }}
+        >
           <TouchableOpacity
             onPress={() => router.back()}
             className="w-10 h-10 rounded-full items-center justify-center"
@@ -569,7 +574,7 @@ export default function FamilyMembersScreen() {
           >
             <MaterialCommunityIcons name="chevron-left" size={22} color={Colors.text.secondary} />
           </TouchableOpacity>
-          <Text style={{ fontSize: 26, fontWeight: '700', color: Colors.text.primary }}>家庭成员</Text>
+          <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text.primary }}>家庭成员</Text>
           <View style={{ width: 40 }} />
         </View>
 
