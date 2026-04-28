@@ -22,17 +22,20 @@ type FamilyMember = {
   role: 'admin' | 'member' | 'guest';
   joinSource: 'creator' | 'invite';
   status: 1 | 0 | -1;
+  isCurrentUser: boolean;
 };
 
 type FamilyInvitation = {
   id: number;
+  inviterId: number | null;
   inviteeContact: string;
   inviteeContactType: 1 | 2;
-  inviteCode: string;
   status: 0 | 1 | -1;
   lastSendTime: string | null;
   expireTime: string;
   createdAt: string;
+  inviterDisplayName: string | null;
+  inviterRole: 'admin' | 'member' | 'guest' | null;
 };
 
 type AssetAccountType = '银行卡' | '支付宝' | '微信' | '公积金' | '股票' | '期权' | '现金' | '保险' | '基金' | '其他';
@@ -121,107 +124,154 @@ export default function ProfileScreen() {
   const [nowTs, setNowTs] = useState(Date.now());
   const [assetAccountCount, setAssetAccountCount] = useState(0);
   const [assetPreviewAccounts, setAssetPreviewAccounts] = useState<Array<{ id: number; account_type: AssetAccountType }>>([]);
+  const [currentFamilyRole, setCurrentFamilyRole] = useState<'admin' | 'member' | 'guest' | null>(null);
+  const [currentMemberId, setCurrentMemberId] = useState<number | null>(null);
+
+  function logFamilyMembersDebug(stage: string, payload?: unknown) {
+    if (!__DEV__) return;
+    console.log(`[ProfileScreen][loadFamily] ${stage}`, payload);
+  }
 
   async function loadFamily() {
     if (!user) return;
-
-    // Step 1: find the member row by profile_id
-    const { data: memberData } = await supabase
-      .from('family_members')
-      .select('family_id')
-      .eq('profile_id', user.id)
-      .eq('status', 1)
-      .maybeSingle();
-
-    if (!memberData?.family_id) {
-      setFamily(null);
-      setFamilyMembers([]);
-      setFamilyInvitations([]);
-      return;
-    }
-
-    // Step 2: fetch full family details by family_id
-    const { data: familyData } = await supabase
-      .from('families')
-      .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
-      .eq('id', memberData.family_id)
-      .maybeSingle();
-
-    const f = familyData as {
-      id: number;
-      family_name: string;
-      family_avatar: string | null;
-      currency: string;
-      debt_warning_threshold: number;
-      repayment_reminder_switch: 0 | 1;
-      data_export_switch: 0 | 1;
-    } | null;
-
-    if (f) setFamily({
-      id: f.id,
-      family_name: f.family_name,
-      family_avatar: f.family_avatar,
-      currency: f.currency,
-      debt_warning_threshold: Number(f.debt_warning_threshold),
-      repayment_reminder_switch: f.repayment_reminder_switch,
-      data_export_switch: f.data_export_switch,
-    });
-    else setFamily(null);
-
-    // Step 3: fetch active family members for UI preview/list
-    setFamilyMembersLoading(true);
     try {
-      const { data: membersData } = await supabase
+      logFamilyMembersDebug('start', { userId: user.id });
+
+      const { data: memberData, error: memberError } = await supabase
         .from('family_members')
-        .select('id, role, join_source, status, profiles:profile_id(display_name, avatar_url)')
-        .eq('family_id', memberData.family_id)
-        .in('status', [1, -1])
-        .order('id', { ascending: true });
+        .select('id, family_id, role')
+        .eq('profile_id', user.id)
+        .eq('status', 1)
+        .maybeSingle();
 
-      const members = (membersData ?? []).map((row: any) => {
-        const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-        return {
-          id: row.id as number,
-          displayName: profile?.display_name ?? `成员${row.id}`,
-          avatarUrl: profile?.avatar_url ?? null,
-          role: (row.role ?? 'member') as 'admin' | 'member' | 'guest',
-          joinSource: (row.join_source ?? 'invite') as 'creator' | 'invite',
-          status: (row.status ?? 1) as 1 | 0 | -1,
-        } satisfies FamilyMember;
-      }).sort((a, b) => {
-        const roleOrder = { admin: 0, member: 1, guest: 2 } as const;
-        return roleOrder[a.role] - roleOrder[b.role] || a.id - b.id;
+      logFamilyMembersDebug('step1 member row', { memberData, memberError });
+
+      if (memberError) throw memberError;
+
+      if (!memberData?.family_id) {
+        logFamilyMembersDebug('stop no family_id', { memberData });
+        setFamily(null);
+        setCurrentFamilyRole(null);
+        setFamilyMembers([]);
+        setFamilyInvitations([]);
+        return;
+      }
+
+      setCurrentFamilyRole((memberData.role ?? null) as 'admin' | 'member' | 'guest' | null);
+      setCurrentMemberId(memberData.id as number);
+
+      const { data: familyData, error: familyError } = await supabase
+        .from('families')
+        .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+        .eq('id', memberData.family_id)
+        .maybeSingle();
+
+      logFamilyMembersDebug('step2 family row', { familyId: memberData.family_id, familyData, familyError });
+
+      if (familyError) throw familyError;
+
+      const f = familyData as {
+        id: number;
+        family_name: string;
+        family_avatar: string | null;
+        currency: string;
+        debt_warning_threshold: number;
+        repayment_reminder_switch: 0 | 1;
+        data_export_switch: 0 | 1;
+      } | null;
+
+      if (f) setFamily({
+        id: f.id,
+        family_name: f.family_name,
+        family_avatar: f.family_avatar,
+        currency: f.currency,
+        debt_warning_threshold: Number(f.debt_warning_threshold),
+        repayment_reminder_switch: f.repayment_reminder_switch,
+        data_export_switch: f.data_export_switch,
       });
+      else setFamily(null);
 
-      setFamilyMembers(members);
-    } finally {
-      setFamilyMembersLoading(false);
-    }
+      setFamilyMembersLoading(true);
+      try {
+        const { data: membersData, error: membersError } = await supabase
+          .from('family_members')
+          .select('id, role, join_source, status, profile_id, user_id, profiles:profile_id(display_name, avatar_url)')
+          .eq('family_id', memberData.family_id)
+          .in('status', [1, -1])
+          .order('id', { ascending: true });
 
-    // Step 4: fetch invitation records for this family
-    setFamilyInvitationsLoading(true);
-    try {
-      const { data: invitationsData } = await supabase
+        logFamilyMembersDebug('step3 raw members', {
+          familyId: memberData.family_id,
+          count: membersData?.length ?? 0,
+          membersError,
+          membersData,
+        });
+
+        if (membersError) throw membersError;
+
+        const members = (membersData ?? []).map((row: any) => {
+          const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+          return {
+            id: row.id as number,
+            displayName: profile?.display_name ?? `成员${row.id}`,
+            avatarUrl: profile?.avatar_url ?? null,
+            role: (row.role ?? 'member') as 'admin' | 'member' | 'guest',
+            joinSource: (row.join_source ?? 'invite') as 'creator' | 'invite',
+            status: (row.status ?? 1) as 1 | 0 | -1,
+            isCurrentUser: row.profile_id === user.id || row.user_id === user.id,
+          } satisfies FamilyMember;
+        }).sort((a, b) => {
+          const roleOrder = { admin: 0, member: 1, guest: 2 } as const;
+          return roleOrder[a.role] - roleOrder[b.role] || a.id - b.id;
+        });
+
+        logFamilyMembersDebug('step3 mapped members', members);
+        setFamilyMembers(members);
+      } finally {
+        setFamilyMembersLoading(false);
+      }
+
+      setFamilyInvitationsLoading(true);
+      try {
+        const { data: invitationsData, error: invitationsError } = await supabase
         .from('family_invitations')
-        .select('id, invitee_contact, invitee_contact_type, invite_code, status, last_send_time, expire_time, created_at')
+        .select('id, inviter_id, invitee_contact, invitee_contact_type, status, last_send_time, expire_time, created_at, inviter:inviter_id(role, profiles:profile_id(display_name))')
         .eq('family_id', memberData.family_id)
         .order('created_at', { ascending: false })
         .limit(20);
 
-      const invitations = (invitationsData ?? []).map((row: any) => ({
-        id: row.id as number,
-        inviteeContact: row.invitee_contact as string,
-        inviteeContactType: (row.invitee_contact_type ?? 1) as 1 | 2,
-        inviteCode: row.invite_code as string,
-        status: (row.status ?? 0) as 0 | 1 | -1,
-        lastSendTime: (row.last_send_time ?? null) as string | null,
-        expireTime: row.expire_time as string,
-        createdAt: row.created_at as string,
-      } satisfies FamilyInvitation));
+        logFamilyMembersDebug('step4 invitations', {
+          familyId: memberData.family_id,
+          count: invitationsData?.length ?? 0,
+          invitationsError,
+        });
 
-      setFamilyInvitations(invitations);
-    } finally {
-      setFamilyInvitationsLoading(false);
+        if (invitationsError) throw invitationsError;
+
+        const invitations = (invitationsData ?? []).map((row: any) => {
+          const inviter = Array.isArray(row.inviter) ? row.inviter[0] : row.inviter;
+          const inviterProfile = inviter ? (Array.isArray(inviter.profiles) ? inviter.profiles[0] : inviter.profiles) : null;
+          return {
+            id: row.id as number,
+            inviterId: (row.inviter_id ?? null) as number | null,
+            inviteeContact: row.invitee_contact as string,
+            inviteeContactType: (row.invitee_contact_type ?? 1) as 1 | 2,
+            status: (row.status ?? 0) as 0 | 1 | -1,
+            lastSendTime: (row.last_send_time ?? null) as string | null,
+            expireTime: row.expire_time as string,
+            createdAt: row.created_at as string,
+            inviterDisplayName: (inviterProfile?.display_name ?? null) as string | null,
+            inviterRole: (inviter?.role ?? null) as 'admin' | 'member' | 'guest' | null,
+          } satisfies FamilyInvitation;
+        });
+
+        setFamilyInvitations(invitations);
+      } finally {
+        setFamilyInvitationsLoading(false);
+      }
+    } catch (error) {
+      logFamilyMembersDebug('error', error);
+      console.error('[ProfileScreen] loadFamily failed:', error);
     }
   }
 
@@ -334,7 +384,7 @@ export default function ProfileScreen() {
     const isExpired = item.status === 0 && new Date(item.expireTime).getTime() <= nowTs;
 
     if (item.status === 1) {
-      return { label: '已接受', color: '#16A34A', bg: '#DCFCE7', actionable: true };
+      return { label: '已接受', color: '#16A34A', bg: '#DCFCE7', actionable: false };
     }
 
     if (item.status === -1 || isExpired) {
@@ -344,10 +394,18 @@ export default function ProfileScreen() {
     return { label: '待确认', color: '#F59E0B', bg: '#FEF3C7', actionable: true };
   }
 
+  function getRoleLabel(role: FamilyInvitation['inviterRole']) {
+    if (role === 'admin') return '超级管理员';
+    if (role === 'member') return '普通成员';
+    if (role === 'guest') return '受限成员';
+    return null;
+  }
+
   const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? '用户';
   const hasAvatar = !!profile?.avatar_url;
   const activeMembers = familyMembers.filter((m) => m.status === 1);
   const previewMembers = activeMembers.slice(0, 2);
+  const canInviteFamilyMembers = currentFamilyRole === 'admin';
   const previewNameText =
     activeMembers.length > 0
       ? `${previewMembers.map((m) => m.displayName).join('、')}${activeMembers.length > 2 ? ` 等${activeMembers.length}人` : ''}`
@@ -535,16 +593,20 @@ export default function ProfileScreen() {
                 <Text className="text-gray-500 text-xl">‹</Text>
               </TouchableOpacity>
               <Text className="text-[28px] font-bold text-gray-900">家庭成员</Text>
-              <TouchableOpacity
-                className="px-4 py-2 rounded-full"
-                style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}
-                onPress={() => {
-                  setShowFamilyMembers(false);
-                  router.push('/(tabs)/family-invite');
-                }}
-              >
-                <Text className="text-sm font-medium" style={{ color: Colors.primary }}>添加成员</Text>
-              </TouchableOpacity>
+              {canInviteFamilyMembers ? (
+                <TouchableOpacity
+                  className="px-4 py-2 rounded-full"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}
+                  onPress={() => {
+                    setShowFamilyMembers(false);
+                    router.push('/(tabs)/family-invite');
+                  }}
+                >
+                  <Text className="text-sm font-medium" style={{ color: Colors.primary }}>添加成员</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={{ width: 72 }} />
+              )}
             </View>
           </View>
 
@@ -564,7 +626,7 @@ export default function ProfileScreen() {
                 }}
               >
                 <Text className="text-base font-semibold text-gray-700">暂无家庭成员</Text>
-                <Text className="text-sm text-gray-500 mt-2">点击右上角添加成员</Text>
+                <Text className="text-sm text-gray-500 mt-2">{canInviteFamilyMembers ? '点击右上角添加成员' : '当前暂无可见成员'}</Text>
               </View>
             ) : (
               familyMembers.map((member) => {
@@ -589,9 +651,9 @@ export default function ProfileScreen() {
                     key={member.id}
                     className="rounded-3xl px-4 py-3.5 mb-3.5 flex-row items-center"
                     style={{
-                      backgroundColor: 'rgba(255,255,255,0.7)',
+                      backgroundColor: member.isCurrentUser ? 'rgba(255,255,255,0.7)' : 'rgba(229,231,235,0.88)',
                       borderWidth: 1,
-                      borderColor: 'rgba(255,255,255,0.6)',
+                      borderColor: member.isCurrentUser ? 'rgba(255,255,255,0.6)' : 'rgba(209,213,219,0.95)',
                     }}
                   >
                     <Avatar uri={member.avatarUrl} name={member.displayName} size="md" />
@@ -685,7 +747,8 @@ export default function ProfileScreen() {
                       <View className="flex-1 pr-3">
                         <View className="flex-row items-center flex-wrap">
                           <Text className="text-xl font-semibold text-gray-800 mr-2">
-                            被邀请人联系方式: {maskInviteeContact(invitation.inviteeContact, invitation.inviteeContactType)}
+                            邀请人: {invitation.inviterDisplayName ?? '未知成员'}
+                            {getRoleLabel(invitation.inviterRole) ? `（${getRoleLabel(invitation.inviterRole)}）` : ''}
                           </Text>
                           <View className="px-2.5 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
                             <Text className="text-[11px] font-semibold" style={{ color: statusMeta.color }}>
@@ -703,35 +766,37 @@ export default function ProfileScreen() {
                           </Text>
                         ) : null}
                         <Text className="text-xs text-gray-400 mt-1.5">
-                          {invitation.inviteeContactType === 1 ? '手机号' : '邮箱'} | 邀请码 {invitation.inviteCode}
+                          被邀请人联系方式: {maskInviteeContact(invitation.inviteeContact, invitation.inviteeContactType)}
                         </Text>
                       </View>
 
-                      <View>
-                        <TouchableOpacity
-                          className="px-3.5 py-2 rounded-full mb-2"
-                          style={{ backgroundColor: '#FFFFFF' }}
-                          onPress={() => {
-                            setShowFamilyMembers(false);
-                            router.push('/(tabs)/family-invite');
-                          }}
-                        >
-                          <Text className="text-sm font-semibold text-gray-700">重新发送</Text>
-                        </TouchableOpacity>
+                      {invitation.inviterId === currentMemberId ? (
+                        <View>
+                          <TouchableOpacity
+                            className="px-3.5 py-2 rounded-full mb-2"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                            onPress={() => {
+                              setShowFamilyMembers(false);
+                              router.push('/(tabs)/family-invite');
+                            }}
+                          >
+                            <Text className="text-sm font-semibold text-gray-700">重新发送</Text>
+                          </TouchableOpacity>
 
-                        <TouchableOpacity
-                          className="px-3.5 py-2 rounded-full"
-                          style={{ backgroundColor: '#FFFFFF' }}
-                          onPress={() => {
-                            Alert.alert('撤销邀请', '确认撤销该邀请吗？', [
-                              { text: '取消', style: 'cancel' },
-                              { text: '确认', style: 'destructive', onPress: () => revokeInvitation(invitation.id) },
-                            ]);
-                          }}
-                        >
-                          <Text className="text-sm font-semibold text-gray-700">撤销邀请</Text>
-                        </TouchableOpacity>
-                      </View>
+                          <TouchableOpacity
+                            className="px-3.5 py-2 rounded-full"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                            onPress={() => {
+                              Alert.alert('撤销邀请', '确认撤销该邀请吗？', [
+                                { text: '取消', style: 'cancel' },
+                                { text: '确认', style: 'destructive', onPress: () => revokeInvitation(invitation.id) },
+                              ]);
+                            }}
+                          >
+                            <Text className="text-sm font-semibold text-gray-700">撤销邀请</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                 );

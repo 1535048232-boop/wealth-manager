@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 
 export interface MemberSummary {
   memberId: number;
@@ -43,6 +44,7 @@ const TYPE_COLORS: Record<string, string> = {
 const LOCKED_TYPES = new Set(['公积金', '期权']);
 
 export function useHomeData() {
+  const { user } = useAuthStore();
   const profileVersion = useAppStore((state) => state.profileVersion);
   const [data, setData] = useState<HomeData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -103,22 +105,15 @@ export function useHomeData() {
         (profilesRes.data ?? []).map((p) => [p.id, p])
       );
 
-      // Find the global latest snapshot date across all accounts
-      const maxDate = snapshots.reduce(
-        (max, s) => (s.snapshot_date > max ? s.snapshot_date : max),
-        '',
-      );
-
-      // Build amount per account using ONLY snapshots from maxDate.
-      // Accounts without a snapshot on maxDate contribute 0 to the total.
+      // Build amount per account using each account's own latest snapshot.
+      // snapshots are already ordered by snapshot_date DESC, so the first
+      // occurrence for an account is its latest known amount.
       const latestByAccount = new Map<number, number>();
       const startOfMonthByAccount = new Map<number, number>();
 
-      if (maxDate) {
-        for (const snap of snapshots) {
-          if (snap.snapshot_date === maxDate) {
-            latestByAccount.set(snap.account_id, Number(snap.amount));
-          }
+      for (const snap of snapshots) {
+        if (!latestByAccount.has(snap.account_id)) {
+          latestByAccount.set(snap.account_id, Number(snap.amount));
         }
       }
 
@@ -218,6 +213,39 @@ export function useHomeData() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`home-data-refresh-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asset_daily_snapshots' },
+        () => {
+          fetchData();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asset_accounts' },
+        () => {
+          fetchData();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'family_members' },
+        () => {
+          fetchData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchData, user?.id]);
 
   return { data, isLoading, error, refetch: fetchData };
 }

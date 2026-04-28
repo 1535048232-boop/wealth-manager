@@ -119,9 +119,11 @@ export default function EntryScreen() {
             member_id,
             family_members!inner(
               id,
+              user_id,
               profiles!profile_id(display_name, avatar_url)
             )
           `)
+          .eq('family_members.user_id', user.id)
           .eq('status', 1)
           .order('created_at', { ascending: false }),
         supabase
