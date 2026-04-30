@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "my-app",
+    "name": "仓仓家庭资产管理",
     "slug": "my-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -37,7 +37,8 @@
     "plugins": [
       "expo-router",
       "expo-image",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

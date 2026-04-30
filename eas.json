@@ -31,6 +31,12 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {},
+      "android": {
+        "serviceAccountKeyPath": "./credentials/android/service-account.json",
+        "track": "internal"
+      }
+    }
   }
 }

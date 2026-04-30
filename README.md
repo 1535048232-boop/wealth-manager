@@ -17,6 +17,71 @@
 
 ## 快速开始
 
+## 敏感信息约定
+
+仓库默认不包含任何可直接用于发布、签名、提审或调用第三方服务的敏感信息。
+
+提交代码前请遵守：
+
+- `.env`、`credentials.json`、`credentials/` 下的真实文件只保留在本机，不提交到仓库
+- 以 `.example` 文件作为模板，复制后再填写真实值
+- `eas.json` 只保留非敏感构建配置，不保存个人 Apple 账号、证书密码、Google Play service account 内容
+
+新开发者需要向维护者索取的信息：
+
+| 场景 | 必需信息 | 用途 |
+|------|----------|------|
+| 本地开发 / Web 联调 | `EXPO_PUBLIC_SUPABASE_URL`、`EXPO_PUBLIC_SUPABASE_ANON_KEY`、`EXPO_PUBLIC_WEB_BASE_URL` | 启动 App、登录、邀请链接回跳 |
+| 邀请邮件 Edge Function | `APP_WEB_BASE_URL`、`APP_SCHEME`、`RESEND_API_KEY`、`INVITE_EMAIL_FROM` | 发送家庭邀请邮件 |
+| Android 提交 Google Play | `credentials/android/service-account.json` | `eas submit --platform android` |
+| iOS 提交 App Store Connect | `appleId`、`ascAppId`、`appleTeamId` | `eas submit --platform ios` |
+| iOS 本地签名 / 本地构建 | `credentials.json`、`credentials/ios/dist-cert.p12`、`credentials/ios/profile.mobileprovision` | 本地签名、证书与描述文件 |
+
+仓库中已经提供：
+
+- `.env.example`
+- `.env.release.local.example`
+- `credentials.example.json`
+
+附加说明：
+
+- iOS 发布说明见 `docs/ios-release.md`
+- 本地配置自检命令：`npm run check:local-config -- <scenario>`
+
+建议初始化步骤：
+
+```bash
+cp .env.example .env
+cp .env.release.local.example .env.release.local
+cp credentials.example.json credentials.json
+```
+
+日常开发通常只需要 `.env`。只有在本地签名、提交商店或本地 EAS 构建时，才需要继续补齐 `.env.release.local`、`credentials.json` 和 `credentials/` 下的真实文件。
+
+## 本地缺失配置清单
+
+其他开发者接手仓库时，可以按下面的清单判断自己缺了什么：
+
+| 使用场景 | 需要存在的本地文件 | 还需要你提供的关键信息 |
+|------|----------------|------------------------|
+| 日常开发 / Web 联调 | `.env` | Supabase URL、Anon Key、Web Base URL |
+| 邀请邮件联调 | `.env` | Resend API Key、发件邮箱、App Scheme |
+| Android 提交 Google Play | `credentials/android/service-account.json` | Google Play Service Account JSON |
+| iOS 本地签名 / 本地构建 | `credentials.json`、`credentials/ios/dist-cert.p12`、`credentials/ios/profile.mobileprovision` | 证书密码、描述文件、签名材料 |
+| iOS 提交 TestFlight / App Store | `.env.release.local` | `EXPO_APPLE_ID`、`ASC_APP_ID`、`APPLE_TEAM_ID`，必要时还包括 `EXPO_APPLE_APP_SPECIFIC_PASSWORD` |
+
+如果某个场景暂时用不到，对应文件可以先不创建。
+
+可直接运行本地自检：
+
+```bash
+npm run check:local-config -- dev
+npm run check:local-config -- ios-submit
+npm run check:local-config -- all
+```
+
+支持的 `scenario`：`dev`、`invite`、`ios-build`、`ios-submit`、`android-submit`、`all`。
+
 ### 1. 安装依赖
 
 ```bash
@@ -25,7 +90,7 @@ npm install
 
 ### 2. 配置环境变量
 
-复制 `.env` 并填入你的 Supabase 项目信息：
+基于 `.env.example` 创建本地 `.env`，再填入你的 Supabase 项目信息：
 
 ```bash
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -45,6 +110,20 @@ INVITE_EMAIL_FROM=Wealth App <noreply@your-domain.com>
 若未配置邮件相关变量（`RESEND_API_KEY` / `INVITE_EMAIL_FROM`），邀请流程仍可使用，但会自动降级为手动分享邀请链接。
 
 > Supabase 控制台 → Project Settings → API 获取以上信息
+
+如果你没有这些值，请直接向维护者索取，不要把临时测试 key 或个人账号信息提交到仓库。
+
+### 2.1 发布相关本地配置
+
+如果你需要执行发布、提审或本地签名，请再基于 `.env.release.local.example` 创建本地 `.env.release.local`：
+
+```bash
+cp .env.release.local.example .env.release.local
+```
+
+这个文件仅保存在本机，不提交到 GitHub，用来记录 iOS 提审时会用到的本地信息。
+
+完整发布步骤见 `docs/ios-release.md`。
 
 ### 3. 启动开发服务器
 
@@ -138,6 +217,7 @@ npx supabase functions deploy send-family-invitation            # 部署邀请�
 
 ```bash
 npm install
+cp .env.example .env
 ```
 
 `.env` 至少需要以下变量：
@@ -247,6 +327,8 @@ eas build --platform android
 
 它默认走 `production` profile，因此 `production` 环境变量也必须提前配置完整。
 
+如果需要把 Android 包提交到 Google Play，还需要维护者提供 `credentials/android/service-account.json`，该文件只应保存在本机的 `credentials/android/` 目录。
+
 ### 5. 启动 iOS 模拟器版本
 
 没有 Apple Developer 账号时：
@@ -274,6 +356,33 @@ eas build:run --id <IOS_BUILD_ID> --platform ios
 - 下载构建产物
 - 让你选择一个模拟器机型
 - 安装并启动 App
+
+如果需要提交到 App Store Connect，仓库不会保存以下信息，必须单独向维护者索取：
+
+1. Apple Developer 登录邮箱 `appleId`
+2. App Store Connect 的 `ascAppId`
+3. Apple Team ID `appleTeamId`
+4. 如需本地签名，还需要 `credentials.json`、证书文件和描述文件
+
+推荐做法是先把这些值填进本地 `.env.release.local`，提交前在当前 shell 中加载：
+
+```bash
+set -a
+source .env.release.local
+set +a
+```
+
+然后再执行：
+
+```bash
+eas submit --platform ios --profile production
+```
+
+说明：
+
+- `EXPO_APPLE_ID` 可直接作为 EAS Submit 环境变量使用
+- `ASC_APP_ID`、`APPLE_TEAM_ID` 建议作为本地发布记录保存，供提审时填写或校验
+- 这些值都不要写回仓库中的 `eas.json`
 
 ### 6. 常见问题
 
