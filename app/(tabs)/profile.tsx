@@ -9,7 +9,6 @@ import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
 import { FamilySettingsModal, FamilyDetail } from '@/components/ui/FamilySettingsModal';
-import { AddAssetAccountModal } from '@/components/ui/AddAssetAccountModal';
 import { AssetAccountListModal } from '@/components/ui/AssetAccountListModal';
 import { ProfileEditModal } from '../../components/ui/ProfileEditModal';
 
@@ -113,7 +112,6 @@ export default function ProfileScreen() {
   const [family, setFamily] = useState<Family | null>(null);
   const [showCreateFamily, setShowCreateFamily] = useState(false);
   const [familyModalMode, setFamilyModalMode] = useState<'create' | 'view'>('create');
-  const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAssetList, setShowAssetList] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [familyMembersLoading, setFamilyMembersLoading] = useState(false);
@@ -480,9 +478,8 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
         {/* ── Header ── */}
-        <View className="flex-row items-center justify-between px-5 pt-4 pb-2">
+        <View className="px-5 pt-4 pb-2">
           <Text className="text-[22px] font-bold text-gray-900">设置</Text>
-          <Avatar uri={profile?.avatar_url} name={hasAvatar ? displayName : undefined} showCamera={!hasAvatar} size="md" />
         </View>
 
         {/* ── User card ── */}
@@ -561,10 +558,6 @@ export default function ProfileScreen() {
             onPress={() => setShowFamilyMembers(true)}
           />
           <SettingRow
-            label="添加资产账户"
-            onPress={() => setShowAddAsset(true)}
-          />
-          <SettingRow
             label="我的资产账户"
             value={
               assetAccountCount > 0 ? (
@@ -620,9 +613,14 @@ export default function ProfileScreen() {
             setDeleteConfirmEmail('');
             setShowDeleteAccount(true);
           }}
-          className="mx-4 mt-3 py-3 items-center"
+          className="mx-4 mt-3 py-3 rounded-2xl items-center"
+          style={{
+            backgroundColor: 'transparent',
+            borderWidth: 1,
+            borderColor: '#E5E7EB',
+          }}
         >
-          <Text className="text-xs font-medium text-gray-400 underline">删除账号</Text>
+          <Text className="text-sm font-medium" style={{ color: '#9F7A82' }}>删除账号</Text>
         </TouchableOpacity>
 
       </ScrollView>
@@ -636,13 +634,6 @@ export default function ProfileScreen() {
         }}
         mode={familyModalMode}
         initialData={family ?? undefined}
-      />
-      <AddAssetAccountModal
-        visible={showAddAsset}
-        onClose={() => {
-          setShowAddAsset(false);
-          loadAssetAccountsPreview();
-        }}
       />
       <AssetAccountListModal
         visible={showAssetList}

@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, PanResponder, useWindowDimensions } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, PanResponder, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useFocusEffect } from 'expo-router';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
-import { Avatar } from '@/components/ui/Avatar';
 import { Colors } from '@/constants/Colors';
-import { useHomeData, type AssetSegmentData, type HomeTrendPoint, type MemberSummary } from '@/hooks/useHomeData';
+import { useHomeData, type AssetSegmentData, type HomeTrendPoint } from '@/hooks/useHomeData';
 
 // ─── Donut chart helpers ────────────────────────────────────────────────────
 
@@ -61,6 +60,11 @@ function formatAmount(n: number) {
   return n < 0 ? `-${result}` : result;
 }
 
+function formatCurrency(n: number) {
+  const sign = n < 0 ? '-' : '';
+  return `${sign}¥${formatAmount(Math.abs(n))}`;
+}
+
 function buildLinePath(points: Array<{ x: number; y: number }>) {
   if (points.length === 0) return '';
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
@@ -89,6 +93,7 @@ function HomeAssetTrendChart({
   const latestIndex = Math.max(points.length - 1, 0);
   const dimensionSegments = segments.slice(0, 5);
   const [selectedIndex, setSelectedIndex] = useState(latestIndex);
+  const [selectedSeriesKey, setSelectedSeriesKey] = useState('total');
   const [isInteracting, setIsInteracting] = useState(false);
 
   useEffect(() => {
@@ -115,6 +120,13 @@ function HomeAssetTrendChart({
     })),
   ];
   const maxValue = Math.max(...series.flatMap((item) => item.values), 0);
+  const seriesKeySignature = series.map((item) => item.key).join('|');
+
+  useEffect(() => {
+    if (!series.some((item) => item.key === selectedSeriesKey)) {
+      setSelectedSeriesKey('total');
+    }
+  }, [selectedSeriesKey, seriesKeySignature]);
 
   if (points.length === 0 || maxValue <= 0) {
     return null;
@@ -133,9 +145,10 @@ function HomeAssetTrendChart({
     selectedValue: item.values[activeIndex] ?? 0,
   }));
   const totalSeries = chartSeries[0];
-  const activeTotalPoint = totalSeries.points[activeIndex];
-  const labelLeft = activeTotalPoint ? Math.max(8, Math.min(activeTotalPoint.x - valueLabelWidth / 2, width - valueLabelWidth - 8)) : 8;
-  const labelTop = activeTotalPoint ? Math.max(0, activeTotalPoint.y - 24) : 0;
+  const selectedSeries = chartSeries.find((item) => item.key === selectedSeriesKey) ?? totalSeries;
+  const activeSelectedPoint = selectedSeries.points[activeIndex];
+  const labelLeft = activeSelectedPoint ? Math.max(8, Math.min(activeSelectedPoint.x - valueLabelWidth / 2, width - valueLabelWidth - 8)) : 8;
+  const labelTop = activeSelectedPoint ? Math.max(0, activeSelectedPoint.y - 24) : 0;
 
   const updateSelectedIndex = useCallback(
     (locationX: number) => {
@@ -187,33 +200,38 @@ function HomeAssetTrendChart({
       </View>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        {chartSeries.map((item) => (
-          <View
+        {chartSeries.map((item) => {
+          const selected = item.key === selectedSeriesKey;
+          return (
+          <TouchableOpacity
             key={item.key}
+            activeOpacity={0.82}
+            onPress={() => setSelectedSeriesKey(item.key)}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               borderRadius: 999,
               paddingHorizontal: 7,
               paddingVertical: 3,
-              backgroundColor: item.isTotal ? Colors.primaryMid : '#FFFFFF',
+              backgroundColor: selected ? (item.isTotal ? Colors.primaryMid : `${item.color}14`) : '#FFFFFF',
               borderWidth: 1,
-              borderColor: item.isTotal ? Colors.primaryLight : Colors.border,
+              borderColor: selected ? item.color : Colors.border,
             }}
           >
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.color, marginRight: 4 }} />
-            <Text numberOfLines={1} style={{ fontSize: 10, color: Colors.text.secondary, maxWidth: 54 }}>
+            <Text numberOfLines={1} style={{ fontSize: 10, color: selected ? Colors.text.primary : Colors.text.secondary, maxWidth: 54 }}>
               {item.label}
             </Text>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: item.isTotal ? Colors.primary : Colors.text.primary, marginLeft: 3 }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: selected ? item.color : Colors.text.primary, marginLeft: 3 }}>
               ¥{formatAmount(item.selectedValue)}
             </Text>
-          </View>
-        ))}
+          </TouchableOpacity>
+          );
+        })}
       </View>
 
       <View style={{ position: 'relative', width, height: chartHeight }}>
-        {activeTotalPoint ? (
+        {activeSelectedPoint ? (
           <View
             pointerEvents="none"
             className="rounded-full px-2 py-0.5"
@@ -222,9 +240,9 @@ function HomeAssetTrendChart({
               left: labelLeft,
               top: labelTop,
               width: valueLabelWidth,
-              backgroundColor: Colors.primary,
+              backgroundColor: selectedSeries.color,
               borderWidth: 1,
-              borderColor: Colors.primary,
+              borderColor: selectedSeries.color,
               alignItems: 'center',
               zIndex: 2,
             }}
@@ -239,7 +257,7 @@ function HomeAssetTrendChart({
                 color: '#FFFFFF',
               }}
             >
-              ¥{formatAmount(totalSeries.selectedValue)}
+              ¥{formatAmount(selectedSeries.selectedValue)}
             </Text>
           </View>
         ) : null}
@@ -262,16 +280,24 @@ function HomeAssetTrendChart({
               d={buildLinePath(item.points)}
               fill="none"
               stroke={item.color}
-              strokeWidth={item.strokeWidth}
+              strokeWidth={item.key === selectedSeriesKey ? 3 : item.strokeWidth}
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeOpacity={0.8}
+              strokeOpacity={item.key === selectedSeriesKey ? 0.95 : 0.28}
             />
           ))}
-          <Path d={buildLinePath(totalSeries.points)} fill="none" stroke={Colors.primary} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
-          {activeTotalPoint ? (
+          <Path
+            d={buildLinePath(totalSeries.points)}
+            fill="none"
+            stroke={Colors.primary}
+            strokeWidth={selectedSeriesKey === 'total' ? 3 : 2.2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeOpacity={selectedSeriesKey === 'total' ? 1 : 0.35}
+          />
+          {activeSelectedPoint ? (
             <Path
-              d={`M ${activeTotalPoint.x.toFixed(1)} 0 L ${activeTotalPoint.x.toFixed(1)} ${chartHeight.toFixed(1)}`}
+              d={`M ${activeSelectedPoint.x.toFixed(1)} 0 L ${activeSelectedPoint.x.toFixed(1)} ${chartHeight.toFixed(1)}`}
               fill="none"
               stroke={isInteracting ? Colors.primaryLight : Colors.border}
               strokeWidth={1}
@@ -281,16 +307,18 @@ function HomeAssetTrendChart({
           {chartSeries.map((item) => {
             const activePoint = item.points[activeIndex];
             if (!activePoint || item.selectedValue <= 0) return null;
+            const selected = item.key === selectedSeriesKey;
 
             return (
               <Circle
                 key={`${item.key}-selected`}
                 cx={activePoint.x}
                 cy={activePoint.y}
-                r={item.isTotal ? (isInteracting ? 5 : 4.5) : isInteracting ? 3.5 : 3}
-                fill={item.isTotal ? Colors.primary : '#FFFFFF'}
+                r={selected ? (isInteracting ? 5 : 4.5) : 2.5}
+                fill={selected && item.isTotal ? Colors.primary : '#FFFFFF'}
                 stroke={item.color}
                 strokeWidth={2}
+                opacity={selected ? 1 : 0.5}
               />
             );
           })}
@@ -322,7 +350,15 @@ function HomeAssetTrendChart({
 
 // ─── Donut chart component ───────────────────────────────────────────────────
 
-function DonutChart({ segments, size = 120 }: { segments: AssetSegmentData[]; size?: number }) {
+function DonutChart({
+  segments,
+  size = 120,
+  centerLabel = '资产结构',
+}: {
+  segments: AssetSegmentData[];
+  size?: number;
+  centerLabel?: string;
+}) {
   const cx = size / 2;
   const cy = size / 2;
   const outerR = size / 2 - 4;
@@ -446,7 +482,7 @@ function DonutChart({ segments, size = 120 }: { segments: AssetSegmentData[]; si
             color: activeSegment ? Colors.text.primary : Colors.text.secondary,
           }}
         >
-          {activeSegment?.label ?? '资产结构'}
+          {activeSegment?.label ?? centerLabel}
         </Text>
         <Text
           style={{
@@ -484,53 +520,228 @@ function LegendItem({ seg }: { seg: AssetSegmentData }) {
   );
 }
 
-// ─── Member card ─────────────────────────────────────────────────────────────
+function ClassificationPieSection({ segments }: { segments: AssetSegmentData[] }) {
+  if (segments.length === 0) return null;
 
-function MemberCard({ member, compact = false }: { member: MemberSummary; compact?: boolean }) {
   return (
-    <View
-      style={{
-        flex: compact ? undefined : 1,
-        width: compact ? '100%' : undefined,
-        backgroundColor: Colors.surface,
-        borderRadius: 16,
-        padding: 14,
-        shadowColor: Colors.shadow,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 1,
-        shadowRadius: 8,
-        elevation: 2,
-        borderWidth: 1,
-        borderColor: Colors.border,
-      }}
-    >
-      <View className="flex-row items-center mb-2">
-        <Avatar uri={member.avatarUrl} name={member.displayName ?? '?'} size="sm" />
-        <Text
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.85}
-          style={{ fontSize: 13, fontWeight: '600', color: Colors.text.primary, marginLeft: 8, flex: 1 }}
-        >
-          {member.displayName ?? '成员'}
+    <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: Colors.border }}>
+      <View className="flex-row items-center justify-between mb-3">
+        <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text.primary }}>资产分类</Text>
+        <Text style={{ fontSize: 11, color: Colors.text.tertiary }}>A/B/C/D</Text>
+      </View>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <DonutChart segments={segments} size={108} centerLabel="资产分类" />
+        <View style={{ marginLeft: 12, flex: 1, minWidth: 0 }}>
+          {segments.map((seg) => (
+            <View key={seg.label} className="flex-row items-center mb-2">
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: seg.color, marginRight: 6 }} />
+              <Text numberOfLines={1} style={{ fontSize: 11, color: Colors.text.secondary, flex: 1 }}>
+                {seg.label}
+              </Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: Colors.text.primary, marginLeft: 6 }}>
+                ¥{formatAmount(seg.amount)}
+              </Text>
+              <Text style={{ fontSize: 11, fontWeight: '600', color: Colors.text.tertiary, marginLeft: 5 }}>
+                {seg.percent}%
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function QuadrantTrendChart({
+  points,
+  width,
+  quadrant,
+  color,
+  title,
+}: {
+  points: HomeTrendPoint[];
+  width: number;
+  quadrant: string;
+  color: string;
+  title: string;
+}) {
+  const chartHeight = 110;
+  const valueLabelWidth = 66;
+  const chartPaddingX = 24;
+  const chartPaddingY = 20;
+  const latestIndex = Math.max(points.length - 1, 0);
+  const [selectedIndex, setSelectedIndex] = useState(latestIndex);
+  const [isInteracting, setIsInteracting] = useState(false);
+
+  useEffect(() => {
+    setSelectedIndex(latestIndex);
+    setIsInteracting(false);
+  }, [latestIndex, points]);
+
+  const values = points.map((point) => point.quadrantAmounts[quadrant] ?? 0);
+  const hasData = values.some((value) => value !== 0);
+  const minValue = Math.min(...values, 0);
+  const maxValue = Math.max(...values, 0);
+  const valueRange = Math.max(maxValue - minValue, 1);
+
+  if (points.length === 0) return null;
+
+  const plotWidth = Math.max(width - chartPaddingX * 2, 0);
+  const activeIndex = clamp(selectedIndex, 0, points.length - 1);
+  const activeLabel = points[activeIndex]?.label ?? '';
+  const activeValue = values[activeIndex] ?? 0;
+  const xStep = points.length === 1 ? 0 : plotWidth / (points.length - 1);
+  const plotHeight = Math.max(chartHeight - chartPaddingY * 2, 1);
+  const chartPoints = values.map((value, index) => ({
+    x: chartPaddingX + index * xStep,
+    y: chartPaddingY + plotHeight - ((value - minValue) / valueRange) * plotHeight,
+  }));
+  const activePoint = chartPoints[activeIndex];
+  const zeroY = chartPaddingY + plotHeight - ((0 - minValue) / valueRange) * plotHeight;
+  const previousValue = activeIndex > 0 ? values[activeIndex - 1] ?? 0 : 0;
+  const growth = activeValue - previousValue;
+  const labelLeft = activePoint ? Math.max(8, Math.min(activePoint.x - valueLabelWidth / 2, width - valueLabelWidth - 8)) : 8;
+  const labelTop = activePoint ? Math.max(0, Math.min(activePoint.y - 24, chartHeight - 20)) : 0;
+
+  const updateSelectedIndex = useCallback(
+    (locationX: number) => {
+      if (points.length <= 1 || plotWidth <= 0) {
+        setSelectedIndex(0);
+        return;
+      }
+
+      const ratio = (locationX - chartPaddingX) / plotWidth;
+      setSelectedIndex(clamp(Math.round(ratio * (points.length - 1)), 0, points.length - 1));
+    },
+    [chartPaddingX, plotWidth, points.length],
+  );
+
+  const resetSelection = useCallback(() => {
+    setIsInteracting(false);
+    setSelectedIndex(latestIndex);
+  }, [latestIndex]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) >= Math.abs(gestureState.dy),
+        onPanResponderGrant: (event) => {
+          setIsInteracting(true);
+          updateSelectedIndex(event.nativeEvent.locationX);
+        },
+        onPanResponderMove: (event) => {
+          updateSelectedIndex(event.nativeEvent.locationX);
+        },
+        onPanResponderRelease: resetSelection,
+        onPanResponderTerminate: resetSelection,
+      }),
+    [resetSelection, updateSelectedIndex],
+  );
+
+  return (
+    <View style={{ marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: Colors.border }}>
+      <View className="flex-row items-center justify-between mb-2">
+        <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text.primary }}>{title}</Text>
+        <Text style={{ fontSize: 11, color: isInteracting ? color : Colors.text.tertiary }}>
+          {isInteracting ? activeLabel : '按住拖动查看'}
         </Text>
       </View>
-      <Text
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.74}
-        style={{
-          fontSize: compact ? 16 : 18,
-          fontWeight: '700',
-          color: Colors.text.primary,
-          letterSpacing: -0.3,
-        }}
-      >
-        ¥{formatAmount(member.totalAmount)}
-      </Text>
-      <Text style={{ fontSize: 12, color: Colors.text.secondary, marginTop: 2 }}>
-        ({member.percent}%)
-      </Text>
+
+      <View className="flex-row items-center mb-2">
+        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: color, marginRight: 5 }} />
+        <Text style={{ fontSize: 11, color: Colors.text.secondary }}>
+          {hasData ? `当前 ${formatCurrency(activeValue)}` : '暂无B类消费数据'}
+        </Text>
+        {hasData ? (
+          <Text style={{ fontSize: 11, color: growth >= 0 ? '#10B981' : '#EF4444', fontWeight: '600', marginLeft: 8 }}>
+            较上月 {growth >= 0 ? '+' : '-'}¥{formatAmount(Math.abs(growth))}
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={{ position: 'relative', width, height: chartHeight }}>
+        {activePoint && hasData ? (
+          <View
+            pointerEvents="none"
+            className="rounded-full px-2 py-0.5"
+            style={{
+              position: 'absolute',
+              left: labelLeft,
+              top: labelTop,
+              width: valueLabelWidth,
+              backgroundColor: color,
+              borderWidth: 1,
+              borderColor: color,
+              alignItems: 'center',
+              zIndex: 2,
+            }}
+          >
+            <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={{ fontSize: 9, fontWeight: '700', color: '#FFFFFF' }}>
+              {formatCurrency(activeValue)}
+            </Text>
+          </View>
+        ) : null}
+
+        <Svg width={width} height={chartHeight}>
+          {[0, 0.5, 1].map((ratio) => {
+            const y = chartHeight - ratio * chartHeight;
+            return (
+              <Path
+                key={ratio}
+                d={`M ${chartPaddingX.toFixed(1)} ${y.toFixed(1)} L ${(width - chartPaddingX).toFixed(1)} ${y.toFixed(1)}`}
+                stroke="#E5E7EB"
+                strokeDasharray="4 4"
+              />
+            );
+          })}
+          <Path
+            d={`M ${chartPaddingX.toFixed(1)} ${zeroY.toFixed(1)} L ${(width - chartPaddingX).toFixed(1)} ${zeroY.toFixed(1)}`}
+            stroke={Colors.text.tertiary}
+            strokeOpacity={0.45}
+            strokeWidth={1}
+          />
+          <Path
+            d={buildLinePath(chartPoints)}
+            fill="none"
+            stroke={color}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeOpacity={hasData ? 1 : 0.45}
+          />
+          {activePoint ? (
+            <>
+              <Path
+                d={`M ${activePoint.x.toFixed(1)} 0 L ${activePoint.x.toFixed(1)} ${chartHeight.toFixed(1)}`}
+                fill="none"
+                stroke={Colors.border}
+                strokeWidth={1}
+                strokeDasharray="4 4"
+              />
+              <Circle cx={activePoint.x} cy={activePoint.y} r={4.5} fill="#FFFFFF" stroke={color} strokeWidth={2} />
+            </>
+          ) : null}
+        </Svg>
+
+        <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 }} {...panResponder.panHandlers} />
+      </View>
+
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingHorizontal: chartPaddingX }}>
+        {points.map((point) => (
+          <Text
+            key={point.label}
+            style={{
+              fontSize: 11,
+              color: point.label === activeLabel ? color : Colors.text.tertiary,
+              fontWeight: point.label === activeLabel ? '700' : '400',
+            }}
+          >
+            {point.label}
+          </Text>
+        ))}
+      </View>
     </View>
   );
 }
@@ -561,7 +772,7 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View className="flex-row items-center justify-between px-5 pt-4 pb-3">
-          <Text style={{ fontSize: 26, fontWeight: '700', color: Colors.text.primary }}>
+          <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text.primary }}>
             {greeting}
           </Text>
           <Text style={{ fontSize: 13, color: Colors.text.secondary }}>
@@ -707,24 +918,16 @@ export default function HomeScreen() {
                 </View>
 
                 <HomeAssetTrendChart points={data.trendPoints} segments={data.segments} width={homeTrendChartWidth} />
+                <ClassificationPieSection segments={data.quadrantSegments} />
+                <QuadrantTrendChart
+                  points={data.trendPoints}
+                  width={homeTrendChartWidth}
+                  quadrant="B类消费"
+                  color="#FB923C"
+                  title="B类消费月度增长趋势"
+                />
               </View>
             </View>
-
-            {/* Member cards */}
-            {data.members.length > 0 && (
-              <View
-                style={{
-                  flexDirection: isNarrowScreen ? 'column' : 'row',
-                  marginHorizontal: 16,
-                  marginTop: 16,
-                  gap: 12,
-                }}
-              >
-                {data.members.map((m) => (
-                  <MemberCard key={m.memberId} member={m} compact={isNarrowScreen} />
-                ))}
-              </View>
-            )}
 
             {/* Empty state: no asset data */}
             {data.totalAssets === 0 && (

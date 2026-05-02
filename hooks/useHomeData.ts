@@ -13,6 +13,7 @@ export interface MemberSummary {
 
 export interface AssetSegmentData {
   label: string;
+  amount: number;
   percent: number;
   color: string;
 }
@@ -21,6 +22,7 @@ export interface HomeTrendPoint {
   label: string;
   totalAmount: number;
   typeAmounts: Record<string, number>;
+  quadrantAmounts: Record<string, number>;
 }
 
 export interface HomeData {
@@ -30,6 +32,7 @@ export interface HomeData {
   disposablePercent: number;
   members: MemberSummary[];
   segments: AssetSegmentData[];
+  quadrantSegments: AssetSegmentData[];
   trendPoints: HomeTrendPoint[];
 }
 
@@ -52,6 +55,15 @@ const TYPE_COLORS: Record<string, string> = {
   '基金':    '#67E8F9',
   '其他':    '#D1D5DB',
 };
+
+const QUADRANT_COLORS: Record<string, string> = {
+  'A类保值': '#8B5CF6',
+  'B类消费': '#FB923C',
+  'C类投资': '#F59E0B',
+  'D类保障': '#14B8A6',
+};
+
+const QUADRANT_LABELS = ['A类保值', 'B类消费', 'C类投资', 'D类保障'];
 
 // Types that are generally locked / non-disposable
 const LOCKED_TYPES = new Set(['公积金', '期权']);
@@ -164,6 +176,7 @@ export function useHomeData() {
       let totalAssets = 0;
       let lockedAmount = 0;
       const typeAmounts = new Map<string, number>();
+      const quadrantAmounts = new Map<string, number>();
       const memberAmounts = new Map<number, number>();
 
       for (const acc of accounts) {
@@ -179,6 +192,12 @@ export function useHomeData() {
           acc.account_type,
           (typeAmounts.get(acc.account_type) ?? 0) + amount
         );
+        if (acc.asset_quadrant) {
+          quadrantAmounts.set(
+            acc.asset_quadrant,
+            (quadrantAmounts.get(acc.asset_quadrant) ?? 0) + amount
+          );
+        }
         memberAmounts.set(
           acc.member_id,
           (memberAmounts.get(acc.member_id) ?? 0) + amount
@@ -205,17 +224,22 @@ export function useHomeData() {
       const trendPoints: HomeTrendPoint[] = trendMonths.map((month) => {
         let totalAmount = 0;
         const trendTypeAmounts: Record<string, number> = {};
+        const trendQuadrantAmounts: Record<string, number> = {};
 
         for (const account of accounts) {
           const amount = getValueAtDate(snapshotsByAccount.get(account.id) ?? [], month.dateText);
           totalAmount += amount;
           trendTypeAmounts[account.account_type] = (trendTypeAmounts[account.account_type] ?? 0) + amount;
+          if (account.asset_quadrant) {
+            trendQuadrantAmounts[account.asset_quadrant] = (trendQuadrantAmounts[account.asset_quadrant] ?? 0) + amount;
+          }
         }
 
         return {
           label: month.label,
           totalAmount,
           typeAmounts: trendTypeAmounts,
+          quadrantAmounts: trendQuadrantAmounts,
         };
       });
 
@@ -230,6 +254,7 @@ export function useHomeData() {
         if (amount <= 0) continue;
         segments.push({
           label: type,
+          amount,
           percent:
             totalAssets > 0
               ? parseFloat(((amount / totalAssets) * 100).toFixed(1))
@@ -238,6 +263,21 @@ export function useHomeData() {
         });
       }
       segments.sort((a, b) => b.percent - a.percent);
+
+      const quadrantSegments: AssetSegmentData[] = QUADRANT_LABELS
+        .map((label) => {
+          const amount = quadrantAmounts.get(label) ?? 0;
+          return {
+            label,
+            amount,
+            percent:
+              totalAssets > 0
+                ? parseFloat(((amount / totalAssets) * 100).toFixed(1))
+                : 0,
+            color: QUADRANT_COLORS[label] ?? '#D1D5DB',
+          };
+        })
+        .filter((segment) => segment.amount > 0);
 
       // Member summaries
       const members: MemberSummary[] = familyMembers
@@ -264,6 +304,7 @@ export function useHomeData() {
         disposablePercent,
         members,
         segments,
+        quadrantSegments,
         trendPoints,
       });
     } catch (e: unknown) {

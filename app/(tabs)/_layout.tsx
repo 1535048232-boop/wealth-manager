@@ -151,20 +151,20 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="entry"
-          options={{
-            title: '录入',
-            tabBarIcon: ({ color }) => (
-              <MaterialCommunityIcons name="playlist-edit" size={24} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
           name="family-members"
           options={{
             title: '成员资产',
             tabBarIcon: ({ color }) => (
               <MaterialCommunityIcons name="account-group" size={24} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="entry"
+          options={{
+            title: '录入',
+            tabBarIcon: ({ color }) => (
+              <MaterialCommunityIcons name="playlist-edit" size={24} color={color} />
             ),
           }}
         />
