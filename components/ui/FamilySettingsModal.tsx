@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
+import { ensureProfileForUser } from '@/lib/profile';
 import { useAuthStore } from '@/stores/authStore';
 
 const CURRENCIES = [
@@ -48,7 +49,7 @@ export interface FamilyDetail {
 interface Props {
   visible: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (family?: FamilyDetail) => void | Promise<void>;
   mode?: 'create' | 'view';
   initialData?: FamilyDetail;
 }
@@ -170,6 +171,29 @@ export function FamilySettingsModal({
     Alert.alert('成功', '已选择预设头像，点击保存后生效');
   }
 
+  async function loadOwnCreatedFamily() {
+    if (!user) return null;
+
+    const { data, error } = await supabase
+      .from('families')
+      .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+      .eq('creator_id', user.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      family_name: data.family_name,
+      family_avatar: data.family_avatar,
+      currency: data.currency,
+      debt_warning_threshold: Number(data.debt_warning_threshold),
+      repayment_reminder_switch: data.repayment_reminder_switch,
+      data_export_switch: data.data_export_switch,
+    } satisfies FamilyDetail;
+  }
+
   async function handleSave() {
     if (!familyName.trim()) {
       Alert.alert('提示', '请输入家庭名称');
@@ -180,28 +204,74 @@ export function FamilySettingsModal({
     setSaving(true);
     try {
       let error;
+      let savedFamily: FamilyDetail | undefined;
       if (mode === 'create') {
-        ({ error } = await supabase.from('families').insert({
-          family_name: familyName.trim(),
-          creator_id: user.id,
-          family_avatar: familyAvatar,
-          currency,
-          debt_warning_threshold: debtThreshold,
-          repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
-          data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
-        }));
+        await ensureProfileForUser(user);
+        const { data, error: insertError } = await supabase
+          .from('families')
+          .insert({
+            family_name: familyName.trim(),
+            creator_id: user.id,
+            family_avatar: familyAvatar,
+            currency,
+            debt_warning_threshold: debtThreshold,
+            repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
+            data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
+          })
+          .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+          .single();
+
+        error = insertError;
+        if (data) {
+          savedFamily = {
+            id: data.id,
+            family_name: data.family_name,
+            family_avatar: data.family_avatar,
+            currency: data.currency,
+            debt_warning_threshold: Number(data.debt_warning_threshold),
+            repayment_reminder_switch: data.repayment_reminder_switch,
+            data_export_switch: data.data_export_switch,
+          };
+        }
       } else {
-        ({ error } = await supabase.from('families').update({
-          family_name: familyName.trim(),
-          family_avatar: familyAvatar,
-          currency,
-          debt_warning_threshold: debtThreshold,
-          repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
-          data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
-        }).eq('id', initialData!.id));
+        const { data, error: updateError } = await supabase
+          .from('families')
+          .update({
+            family_name: familyName.trim(),
+            family_avatar: familyAvatar,
+            currency,
+            debt_warning_threshold: debtThreshold,
+            repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
+            data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
+          })
+          .eq('id', initialData!.id)
+          .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+          .single();
+
+        error = updateError;
+        if (data) {
+          savedFamily = {
+            id: data.id,
+            family_name: data.family_name,
+            family_avatar: data.family_avatar,
+            currency: data.currency,
+            debt_warning_threshold: Number(data.debt_warning_threshold),
+            repayment_reminder_switch: data.repayment_reminder_switch,
+            data_export_switch: data.data_export_switch,
+          };
+        }
       }
 
       if (error) {
+        if (mode === 'create' && error.code === '23505') {
+          const existingFamily = await loadOwnCreatedFamily();
+          if (existingFamily) {
+            await onSuccess?.(existingFamily);
+            onClose();
+            return;
+          }
+        }
+
         const msg =
           error.code === '23505'
             ? '您已创建过家庭，每个账号只能创建一个家庭。'
@@ -210,8 +280,11 @@ export function FamilySettingsModal({
         return;
       }
 
-      onSuccess?.();
+      await onSuccess?.(savedFamily);
       onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '保存失败，请稍后重试';
+      Alert.alert('保存失败', message);
     } finally {
       setSaving(false);
     }

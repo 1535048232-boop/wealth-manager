@@ -413,34 +413,38 @@ export default function EntryScreen() {
 
           {isEditing ? (
             /* ── Inline amount input ── */
-            <View style={styles.inlineInputRow}>
-              <Text style={styles.currencySymbol}>¥</Text>
-              <TextInput
-                ref={inputRef}
-                value={inputAmount}
-                onChangeText={setInputAmount}
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-                onSubmitEditing={() => saveSnapshot(item.id)}
-                placeholder="输入金额"
-                placeholderTextColor={Colors.text.tertiary}
-                style={styles.inlineInput}
-                selectTextOnFocus
-              />
-              <TouchableOpacity
-                onPress={() => saveSnapshot(item.id)}
-                disabled={saving}
-                style={styles.saveBtn}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.saveBtnText}>保存</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity onPress={cancelEdit} style={styles.cancelBtn}>
-                <Text style={styles.cancelBtnText}>取消</Text>
-              </TouchableOpacity>
+            <View style={styles.inlineEditor}>
+              <View style={styles.inlineInputRow}>
+                <Text style={styles.currencySymbol}>¥</Text>
+                <TextInput
+                  ref={inputRef}
+                  value={inputAmount}
+                  onChangeText={setInputAmount}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                  onSubmitEditing={() => saveSnapshot(item.id)}
+                  placeholder="输入金额"
+                  placeholderTextColor={Colors.text.tertiary}
+                  style={styles.inlineInput}
+                  selectTextOnFocus
+                />
+              </View>
+              <View style={styles.inlineActionRow}>
+                <TouchableOpacity onPress={cancelEdit} style={styles.cancelBtn}>
+                  <Text style={styles.cancelBtnText}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => saveSnapshot(item.id)}
+                  disabled={saving}
+                  style={styles.saveBtn}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.saveBtnText}>保存</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             /* ── Balance display row ── */
@@ -793,11 +797,14 @@ const styles = StyleSheet.create({
   },
 
   // Inline snapshot input
+  inlineEditor: {
+    marginTop: 6,
+  },
   inlineInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
     gap: 6,
+    width: '100%',
   },
   currencySymbol: {
     fontSize: 16,
@@ -806,6 +813,7 @@ const styles = StyleSheet.create({
   },
   inlineInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text.primary,
@@ -814,8 +822,17 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 4 : 2,
     padding: 0,
   },
+  inlineActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
   saveBtn: {
     backgroundColor: Colors.primary,
+    minWidth: 64,
+    alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,

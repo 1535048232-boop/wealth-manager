@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, PanResponder, ScrollView, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Avatar } from '@/components/ui/Avatar';
@@ -125,26 +123,29 @@ function getValueAtDate(snapshots: SnapshotRow[], dateText: string) {
   return lastAmount;
 }
 
-function getMemberSeriesPoints(data: FamilyMembersAnalyticsData, memberId: number, width: number, height: number, maxValue: number) {
+function getMemberSeriesPoints(data: FamilyMembersAnalyticsData, memberId: number, width: number, height: number, maxValue: number, horizontalPadding = 0) {
   if (data.trendPoints.length === 0 || maxValue <= 0) return [] as Array<{ x: number; y: number }>;
 
-  const xStep = data.trendPoints.length === 1 ? 0 : width / (data.trendPoints.length - 1);
+  const drawableWidth = Math.max(width - horizontalPadding * 2, 1);
+  const xStep = data.trendPoints.length === 1 ? 0 : drawableWidth / (data.trendPoints.length - 1);
 
   return data.trendPoints.map((point, index) => {
     const value = point.totalsByMember[memberId] ?? 0;
     return {
-      x: index * xStep,
+      x: horizontalPadding + index * xStep,
       y: height - (value / maxValue) * height,
     };
   });
 }
 
 function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
-  const chartWidth = 300;
   const chartHeight = 160;
   const chartInnerHeight = chartHeight - 18;
   const axisLabels = [0, 0.25, 0.5, 0.75, 1];
   const [selectedIndex, setSelectedIndex] = useState(Math.max(data.trendPoints.length - 1, 0));
+  const [chartWidth, setChartWidth] = useState(300);
+  const chartHorizontalPadding = 24;
+  const drawableChartWidth = Math.max(chartWidth - chartHorizontalPadding * 2, 1);
   const maxValue = Math.max(
     ...data.trendPoints.flatMap((point) => Object.values(point.totalsByMember)),
     0,
@@ -156,20 +157,32 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
 
   const selectedPoint = data.trendPoints[selectedIndex] ?? data.trendPoints[data.trendPoints.length - 1];
   const selectedLineX = data.trendPoints.length > 1
-    ? (selectedIndex / (data.trendPoints.length - 1)) * chartWidth
-    : 0;
-  const tooltipWidth = 150;
-  const tooltipLeft = Math.max(0, Math.min(selectedLineX - tooltipWidth / 2, chartWidth - tooltipWidth));
+    ? chartHorizontalPadding + (selectedIndex / (data.trendPoints.length - 1)) * drawableChartWidth
+    : chartHorizontalPadding;
+  const tooltipWidth = Math.min(178, Math.max(142, chartWidth - 24));
+  const tooltipLeft = Math.max(8, Math.min(selectedLineX - tooltipWidth / 2, chartWidth - tooltipWidth - 8));
 
-  function updateSelectedIndex(locationX: number) {
+  const updateSelectedIndex = useCallback((locationX: number) => {
     if (data.trendPoints.length === 0) return;
-    const x = Math.max(0, Math.min(locationX, chartWidth));
-    const rawIndex = chartWidth === 0 || data.trendPoints.length === 1
+    const x = Math.max(chartHorizontalPadding, Math.min(locationX, chartWidth - chartHorizontalPadding));
+    const rawIndex = data.trendPoints.length === 1
       ? 0
-      : Math.round((x / chartWidth) * (data.trendPoints.length - 1));
+      : Math.round(((x - chartHorizontalPadding) / drawableChartWidth) * (data.trendPoints.length - 1));
 
     setSelectedIndex(Math.max(0, Math.min(rawIndex, data.trendPoints.length - 1)));
-  }
+  }, [chartHorizontalPadding, data.trendPoints.length, drawableChartWidth, chartWidth]);
+
+  const chartPanResponder = useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderGrant: (event) => updateSelectedIndex(event.nativeEvent.locationX),
+      onPanResponderMove: (event) => updateSelectedIndex(event.nativeEvent.locationX),
+    }),
+    [updateSelectedIndex],
+  );
 
   if (data.trendPoints.length === 0 || maxValue <= 0) {
     return (
@@ -181,7 +194,7 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
   }
 
   return (
-    <View className="rounded-3xl px-5 py-5" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border }}>
+    <View className="rounded-3xl px-5 py-5" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, overflow: 'visible' }}>
       <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
 
       <View className="flex-row items-center flex-wrap mt-3 mb-3">
@@ -202,13 +215,16 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
           ))}
         </View>
 
-        <View>
+        <View
+          style={{ flex: 1, minWidth: 0, overflow: 'visible' }}
+          onLayout={(event) => {
+            const nextWidth = Math.max(180, Math.floor(event.nativeEvent.layout.width));
+            setChartWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current));
+          }}
+        >
           <View
-            style={{ width: chartWidth, height: chartHeight, position: 'relative' }}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderGrant={(event) => updateSelectedIndex(event.nativeEvent.locationX)}
-            onResponderMove={(event) => updateSelectedIndex(event.nativeEvent.locationX)}
+            style={{ width: '100%', height: chartHeight, position: 'relative', overflow: 'visible' }}
+            {...chartPanResponder.panHandlers}
           >
             {selectedPoint ? (
               <View
@@ -237,7 +253,7 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
                   const selectedValue = selectedPoint.totalsByMember[member.memberId] ?? 0;
                   return (
                     <View key={member.memberId} className="flex-row items-center justify-between mb-1 last:mb-0">
-                      <View className="flex-row items-center flex-1 mr-2">
+                      <View className="flex-row items-center flex-1 mr-2" style={{ minWidth: 0 }}>
                         <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: member.lineColor, marginRight: 6 }} />
                         <Text numberOfLines={1} style={{ fontSize: 11, color: Colors.text.secondary, flex: 1 }}>
                           {member.displayName}
@@ -255,14 +271,24 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
             <Svg width={chartWidth} height={chartHeight}>
               {axisLabels.map((ratio) => {
                 const y = chartHeight - ratio * chartHeight;
-                return <Line key={ratio} x1="0" y1={y} x2={chartWidth} y2={y} stroke="#E5E7EB" strokeDasharray="4 4" />;
+                return (
+                  <Line
+                    key={ratio}
+                    x1={chartHorizontalPadding}
+                    y1={y}
+                    x2={chartWidth - chartHorizontalPadding}
+                    y2={y}
+                    stroke="#E5E7EB"
+                    strokeDasharray="4 4"
+                  />
+                );
               })}
 
               {selectedPoint && data.trendPoints.length > 1 ? (
                 <Line
-                  x1={(selectedIndex / (data.trendPoints.length - 1)) * chartWidth}
+                  x1={selectedLineX}
                   y1={0}
-                  x2={(selectedIndex / (data.trendPoints.length - 1)) * chartWidth}
+                  x2={selectedLineX}
                   y2={chartHeight}
                   stroke="#D8B4FE"
                   strokeDasharray="4 4"
@@ -270,7 +296,7 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
               ) : null}
 
               {data.memberCards.map((member) => {
-                const points = getMemberSeriesPoints(data, member.memberId, chartWidth, chartInnerHeight, maxValue);
+                const points = getMemberSeriesPoints(data, member.memberId, chartWidth, chartInnerHeight, maxValue, chartHorizontalPadding);
                 const path = buildLinePath(points);
                 const lastPoint = points[points.length - 1];
                 const selectedChartPoint = points[selectedIndex];
@@ -291,11 +317,17 @@ function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
             </Svg>
           </View>
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, width: chartWidth }}>
+          <View style={{ position: 'relative', marginTop: 8, width: '100%', height: 18 }}>
             {data.trendPoints.map((point, index) => (
               <Text
                 key={point.label}
                 style={{
+                  position: 'absolute',
+                  left: data.trendPoints.length === 1
+                    ? chartHorizontalPadding - 12
+                    : chartHorizontalPadding + (index / (data.trendPoints.length - 1)) * drawableChartWidth - 12,
+                  width: 24,
+                  textAlign: 'center',
                   fontSize: 11,
                   color: index === selectedIndex ? Colors.primary : Colors.text.tertiary,
                   fontWeight: index === selectedIndex ? '700' : '400',
@@ -556,26 +588,19 @@ function useFamilyMembersAnalytics() {
 }
 
 export default function FamilyMembersScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { data, isLoading, error } = useFamilyMembersAnalytics();
 
   return (
     <ScreenWrapper className="bg-app-bg">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
         <View
-          className="px-5 pb-3 flex-row items-center justify-between"
+          className="px-5 pb-3"
           style={{ paddingTop: 48 }}
         >
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="w-10 h-10 rounded-full items-center justify-center"
-            style={{ backgroundColor: Colors.surface }}
-          >
-            <MaterialCommunityIcons name="chevron-left" size={22} color={Colors.text.secondary} />
-          </TouchableOpacity>
-          <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text.primary }}>家庭成员</Text>
-          <View style={{ width: 40 }} />
+          <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text.primary }}>成员资产</Text>
+          <Text style={{ fontSize: 13, color: Colors.text.secondary, marginTop: 4 }}>
+            查看家庭成员资产占比与趋势
+          </Text>
         </View>
 
         {isLoading ? (

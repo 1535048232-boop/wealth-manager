@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { ensureProfileForUser } from "@/lib/profile";
 
 function getAuthParamsFromUrl(url: string) {
   const [baseAndQuery, hash = ""] = url.split("#");
@@ -75,20 +76,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       // Ensure a profile row exists for this user (handles cases where the
       // signup trigger may not have fired, e.g. legacy accounts).
-      const userId = data.session.user.id;
-      const { data: existing } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (!existing) {
-        await supabase.from("profiles").insert({
-          id: userId,
-          email: data.session.user.email ?? email,
-          display_name: (data.session.user.email ?? email).split("@")[0],
-        });
-      }
+      await ensureProfileForUser(data.session.user, email);
     } else {
       set({ isLoading: false });
     }
@@ -113,6 +101,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         isLoading: false,
         pendingEmailConfirmation: false,
       });
+      await ensureProfileForUser(data.session.user, email);
     } else {
       set({ isLoading: false, pendingEmailConfirmation: needsConfirmation });
     }

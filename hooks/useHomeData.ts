@@ -20,6 +20,7 @@ export interface AssetSegmentData {
 export interface HomeTrendPoint {
   label: string;
   totalAmount: number;
+  typeAmounts: Record<string, number>;
 }
 
 export interface HomeData {
@@ -203,14 +204,18 @@ export function useHomeData() {
 
       const trendPoints: HomeTrendPoint[] = trendMonths.map((month) => {
         let totalAmount = 0;
+        const trendTypeAmounts: Record<string, number> = {};
 
         for (const account of accounts) {
-          totalAmount += getValueAtDate(snapshotsByAccount.get(account.id) ?? [], month.dateText);
+          const amount = getValueAtDate(snapshotsByAccount.get(account.id) ?? [], month.dateText);
+          totalAmount += amount;
+          trendTypeAmounts[account.account_type] = (trendTypeAmounts[account.account_type] ?? 0) + amount;
         }
 
         return {
           label: month.label,
           totalAmount,
+          typeAmounts: trendTypeAmounts,
         };
       });
 

@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, View } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FamilyInvitationPromptModal, type FamilyInvitationPrompt } from '@/components/ui/FamilyInvitationPromptModal';
@@ -154,36 +154,18 @@ export default function TabLayout() {
           name="entry"
           options={{
             title: '录入',
-            tabBarButton: ({ onPress }) => (
-              <Pressable
-                onPress={onPress}
-                style={{
-                  flex: 1,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  top: -14,
-                }}
-              >
-                <View
-                  style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: 26,
-                    backgroundColor: Colors.primary,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    shadowColor: Colors.primary,
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.35,
-                    shadowRadius: 10,
-                    elevation: 6,
-                  }}
-                >
-                  <MaterialCommunityIcons name="plus" size={24} color="#fff" />
-                </View>
-              </Pressable>
+            tabBarIcon: ({ color }) => (
+              <MaterialCommunityIcons name="playlist-edit" size={24} color={color} />
             ),
-            tabBarLabel: () => null,
+          }}
+        />
+        <Tabs.Screen
+          name="family-members"
+          options={{
+            title: '成员资产',
+            tabBarIcon: ({ color }) => (
+              <MaterialCommunityIcons name="account-group" size={24} color={color} />
+            ),
           }}
         />
         <Tabs.Screen
@@ -200,13 +182,6 @@ export default function TabLayout() {
           options={{
             href: null,
             title: '邀请成员',
-          }}
-        />
-        <Tabs.Screen
-          name="family-members"
-          options={{
-            href: null,
-            title: '家庭成员',
           }}
         />
       </Tabs>

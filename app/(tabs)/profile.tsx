@@ -188,6 +188,31 @@ export default function ProfileScreen() {
       if (memberError) throw memberError;
 
       if (!memberData?.family_id) {
+        const { data: creatorFamily, error: creatorFamilyError } = await supabase
+          .from('families')
+          .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+          .eq('creator_id', user.id)
+          .maybeSingle();
+
+        if (creatorFamilyError) throw creatorFamilyError;
+
+        if (creatorFamily) {
+          setFamily({
+            id: creatorFamily.id,
+            family_name: creatorFamily.family_name,
+            family_avatar: creatorFamily.family_avatar,
+            currency: creatorFamily.currency,
+            debt_warning_threshold: Number(creatorFamily.debt_warning_threshold),
+            repayment_reminder_switch: creatorFamily.repayment_reminder_switch,
+            data_export_switch: creatorFamily.data_export_switch,
+          });
+          setCurrentFamilyRole('admin');
+          setCurrentMemberId(null);
+          setFamilyMembers([]);
+          setFamilyInvitations([]);
+          return;
+        }
+
         logFamilyMembersDebug('stop no family_id', { memberData });
         setFamily(null);
         setCurrentFamilyRole(null);
@@ -604,7 +629,11 @@ export default function ProfileScreen() {
       <FamilySettingsModal
         visible={showCreateFamily}
         onClose={() => setShowCreateFamily(false)}
-        onSuccess={() => { setShowCreateFamily(false); loadFamily(); }}
+        onSuccess={(nextFamily) => {
+          setShowCreateFamily(false);
+          if (nextFamily) setFamily(nextFamily);
+          loadFamily();
+        }}
         mode={familyModalMode}
         initialData={family ?? undefined}
       />
