@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -41,11 +42,21 @@ interface AccountItem {
   member_name: string;
 }
 
+interface SnapshotInfo {
+  amount: string;
+  date: string; // "YYYY-MM-DD"
+}
+
 // ─── Static maps ─────────────────────────────────────────────────────────────
 
 const FILTER_TYPES: (DbAccountType | '全部')[] = [
   '全部', '银行卡', '股票', '公积金', '期权', '基金', '支付宝', '微信', '现金', '保险', '其他',
 ];
+
+function formatSnapshotDate(dateStr: string): string {
+  const parts = dateStr.split('-');
+  return `${parseInt(parts[1])}月${parseInt(parts[2])}日`;
+}
 
 const TYPE_META: Record<string, { emoji: string; bgColor: string }> = {
   银行卡: { emoji: '💳', bgColor: '#EEF2FF' },
@@ -83,8 +94,8 @@ export default function EntryScreen() {
   const [selectedQuadrant, setSelectedQuadrant] = useState<DbAssetQuadrant | null>(null);
 
   // ── Snapshot state ───────────────────────────────────────────────────────
-  // Maps account_id → today's saved amount (string for display)
-  const [snapshotMap, setSnapshotMap]         = useState<Record<number, string>>({});
+  // Maps account_id → latest saved snapshot info (amount + date)
+  const [snapshotMap, setSnapshotMap]         = useState<Record<number, SnapshotInfo>>({});
   const [editingId, setEditingId]             = useState<number | null>(null);
   const [inputAmount, setInputAmount]         = useState('');
   const [saving, setSaving]                   = useState(false);
@@ -96,8 +107,6 @@ export default function EntryScreen() {
     if (!user) return;
     setLoading(true);
     try {
-      const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
-
       const [accountsRes, snapshotsRes] = await Promise.all([
         supabase
           .from('asset_accounts')
@@ -110,24 +119,29 @@ export default function EntryScreen() {
             member_id,
             family_members!inner(
               id,
+              user_id,
               profiles!profile_id(display_name, avatar_url)
             )
           `)
+          .eq('family_members.user_id', user.id)
           .eq('status', 1)
           .order('created_at', { ascending: false }),
         supabase
           .from('asset_daily_snapshots')
-          .select('account_id, amount')
-          .eq('snapshot_date', today),
+          .select('account_id, amount, snapshot_date')
+          .order('snapshot_date', { ascending: false })
+          .limit(1000),
       ]);
 
       if (accountsRes.error) throw accountsRes.error;
       if (snapshotsRes.error) throw snapshotsRes.error;
 
-      // Build snapshot map: account_id → formatted amount string
-      const newSnapshotMap: Record<number, string> = {};
+      // Build snapshot map: account_id → latest SnapshotInfo (data already sorted DESC)
+      const newSnapshotMap: Record<number, SnapshotInfo> = {};
       for (const row of snapshotsRes.data ?? []) {
-        newSnapshotMap[row.account_id] = String(row.amount);
+        if (!(row.account_id in newSnapshotMap)) {
+          newSnapshotMap[row.account_id] = { amount: String(row.amount), date: row.snapshot_date };
+        }
       }
       setSnapshotMap(newSnapshotMap);
 
@@ -170,10 +184,17 @@ export default function EntryScreen() {
     fetchData();
   }, [fetchData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData]),
+  );
+
   // ── Snapshot save ─────────────────────────────────────────────────────────
 
   const openEdit = useCallback((account: AccountItem) => {
-    const current = snapshotMap[account.id] ?? '';
+    const snap = snapshotMap[account.id];
+    const current = snap?.amount ?? '';
     setEditingId(account.id);
     setInputAmount(current);
     // Focus after state flush
@@ -208,7 +229,7 @@ export default function EntryScreen() {
         );
       if (error) throw error;
 
-      setSnapshotMap(prev => ({ ...prev, [accountId]: String(numeric) }));
+      setSnapshotMap(prev => ({ ...prev, [accountId]: { amount: String(numeric), date: today } }));
       setEditingId(null);
       setInputAmount('');
     } catch (e) {
@@ -364,7 +385,9 @@ export default function EntryScreen() {
     const qMeta     = item.asset_quadrant ? QUADRANT_META[item.asset_quadrant] : null;
     const typeMeta  = TYPE_META[item.account_type] ?? TYPE_META['其他'];
     const isEditing = editingId === item.id;
-    const savedAmt  = snapshotMap[item.id];
+    const savedSnap = snapshotMap[item.id];
+    const today     = new Date().toISOString().slice(0, 10);
+    const isToday   = savedSnap?.date === today;
 
     return (
       <TouchableOpacity
@@ -388,47 +411,60 @@ export default function EntryScreen() {
 
           {isEditing ? (
             /* ── Inline amount input ── */
-            <View style={styles.inlineInputRow}>
-              <Text style={styles.currencySymbol}>¥</Text>
-              <TextInput
-                ref={inputRef}
-                value={inputAmount}
-                onChangeText={setInputAmount}
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-                onSubmitEditing={() => saveSnapshot(item.id)}
-                placeholder="输入金额"
-                placeholderTextColor={Colors.text.tertiary}
-                style={styles.inlineInput}
-                selectTextOnFocus
-              />
-              <TouchableOpacity
-                onPress={() => saveSnapshot(item.id)}
-                disabled={saving}
-                style={styles.saveBtn}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.saveBtnText}>保存</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity onPress={cancelEdit} style={styles.cancelBtn}>
-                <Text style={styles.cancelBtnText}>取消</Text>
-              </TouchableOpacity>
+            <View style={styles.inlineEditor}>
+              <View style={styles.inlineInputRow}>
+                <Text style={styles.currencySymbol}>¥</Text>
+                <TextInput
+                  ref={inputRef}
+                  value={inputAmount}
+                  onChangeText={setInputAmount}
+                  keyboardType="decimal-pad"
+                  returnKeyType="done"
+                  onSubmitEditing={() => saveSnapshot(item.id)}
+                  placeholder="输入金额"
+                  placeholderTextColor={Colors.text.tertiary}
+                  style={styles.inlineInput}
+                  selectTextOnFocus
+                />
+              </View>
+              <View style={styles.inlineActionRow}>
+                <TouchableOpacity onPress={cancelEdit} style={styles.cancelBtn}>
+                  <Text style={styles.cancelBtnText}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => saveSnapshot(item.id)}
+                  disabled={saving}
+                  style={styles.saveBtn}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.saveBtnText}>保存</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             /* ── Balance display row ── */
-            <View style={styles.cardRow}>
-              <Text style={[styles.balancePlaceholder, savedAmt !== undefined && styles.balanceSaved]}>
-                {savedAmt !== undefined ? `¥ ${Number(savedAmt).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` : '¥ — 点击录入'}
-              </Text>
-              {qMeta && (
-                <View style={[styles.quadrantBadge, { backgroundColor: qMeta.bg, borderColor: qMeta.border }]}>
-                  <Text style={[styles.quadrantBadgeText, { color: qMeta.color }]}>
-                    {qMeta.short}
-                  </Text>
-                </View>
+            <View>
+              <View style={styles.cardRow}>
+                <Text style={[styles.balancePlaceholder, savedSnap !== undefined && styles.balanceSaved]}>
+                  {savedSnap !== undefined
+                    ? `¥ ${Number(savedSnap.amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`
+                    : '¥ — 点击录入'}
+                </Text>
+                {qMeta && (
+                  <View style={[styles.quadrantBadge, { backgroundColor: qMeta.bg, borderColor: qMeta.border }]}>
+                    <Text style={[styles.quadrantBadgeText, { color: qMeta.color }]}>
+                      {qMeta.short}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              {savedSnap !== undefined && (
+                <Text style={[styles.snapshotDateLabel, isToday && styles.snapshotDateToday]}>
+                  {isToday ? '今日已录入 ✓' : `录入于 ${formatSnapshotDate(savedSnap.date)}`}
+                </Text>
               )}
             </View>
           )}
@@ -508,6 +544,7 @@ export default function EntryScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        style={{ flex: 1 }}
       />
     </ScreenWrapper>
   );
@@ -551,7 +588,7 @@ function FilterPill({
 const styles = StyleSheet.create({
   pageHeader: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 16,
     paddingBottom: 6,
   },
   pageTitle: {
@@ -602,7 +639,6 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingTop: 2,
     marginBottom: 4,
-    overflow: 'visible',
   },
   typeTabsContent: {
     paddingHorizontal: 16,
@@ -679,6 +715,9 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
+  cardReadOnly: {
+    opacity: 0.6,
+  },
   iconCircle: {
     width: 46,
     height: 46,
@@ -729,6 +768,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  snapshotDateLabel: {
+    fontSize: 11,
+    color: Colors.text.tertiary,
+    marginTop: 1,
+  },
+  snapshotDateToday: {
+    color: '#10B981',
+    fontWeight: '500',
+  },
 
   // Footer
   footerCount: {
@@ -747,11 +795,14 @@ const styles = StyleSheet.create({
   },
 
   // Inline snapshot input
+  inlineEditor: {
+    marginTop: 6,
+  },
   inlineInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
     gap: 6,
+    width: '100%',
   },
   currencySymbol: {
     fontSize: 16,
@@ -760,6 +811,7 @@ const styles = StyleSheet.create({
   },
   inlineInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text.primary,
@@ -768,8 +820,17 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 4 : 2,
     padding: 0,
   },
+  inlineActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
   saveBtn: {
     backgroundColor: Colors.primary,
+    minWidth: 64,
+    alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,

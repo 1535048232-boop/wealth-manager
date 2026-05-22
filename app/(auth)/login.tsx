@@ -1,17 +1,41 @@
 import { useState } from 'react';
 import { View, Text, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity } from 'react-native';
-import { Link } from 'expo-router';
+import { type Href, Link, useLocalSearchParams, useRouter } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 
+function toSafeHref(value: string): Href | null {
+  return value.startsWith('/') ? (value as Href) : null;
+}
+
+function getPasswordResetRedirectTo() {
+  const webBaseUrl = process.env.EXPO_PUBLIC_WEB_BASE_URL?.trim().replace(/\/$/, '');
+
+  if (Platform.OS === 'web') {
+    if (webBaseUrl) {
+      return `${webBaseUrl}/reset-password`;
+    }
+
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/reset-password`;
+    }
+  }
+
+  return Linking.createURL('/reset-password');
+}
+
 export default function LoginScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ redirectTo?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [unconfirmedEmail, setUnconfirmedEmail] = useState('');
   const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
-  const { signInWithEmail, resendConfirmationEmail, isLoading } = useAuthStore();
+  const [resetStatus, setResetStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const { signInWithEmail, resendConfirmationEmail, sendPasswordResetEmail, isLoading } = useAuthStore();
 
   async function handleLogin() {
     setError('');
@@ -29,6 +53,13 @@ export default function LoginScreen() {
       } else {
         setError(error.message);
       }
+      return;
+    }
+
+    const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : '';
+    const redirectHref = toSafeHref(redirectTo);
+    if (redirectHref) {
+      router.replace(redirectHref);
     }
   }
 
@@ -46,6 +77,32 @@ export default function LoginScreen() {
     } else {
       setResendStatus('sent');
     }
+  }
+
+  async function handleForgotPassword() {
+    setError('');
+    setUnconfirmedEmail('');
+    setResendStatus('idle');
+
+    if (!email) {
+      setError('请先填写邮箱，再发送重置邮件');
+      return;
+    }
+
+    setResetStatus('sending');
+    const { error } = await sendPasswordResetEmail(email, getPasswordResetRedirectTo());
+
+    if (error) {
+      setResetStatus('idle');
+      if (error.message.toLowerCase().includes('rate limit')) {
+        setError('发送太频繁，请稍后再试');
+      } else {
+        setError(error.message);
+      }
+      return;
+    }
+
+    setResetStatus('sent');
   }
 
   return (
@@ -77,6 +134,22 @@ export default function LoginScreen() {
           onChangeText={setPassword}
           secureTextEntry
         />
+
+        <View className="items-end mb-4">
+          <TouchableOpacity onPress={handleForgotPassword} disabled={resetStatus === 'sending'}>
+            <Text className="text-sm font-medium text-blue-600">
+              {resetStatus === 'sending' ? '发送中…' : '忘记密码？'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {resetStatus === 'sent' ? (
+          <View className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
+            <Text className="text-emerald-700 text-sm">
+              重置邮件已发送，请从邮件中的链接进入并设置新密码。
+            </Text>
+          </View>
+        ) : null}
 
         {/* Email not confirmed banner */}
         {unconfirmedEmail ? (

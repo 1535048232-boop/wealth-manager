@@ -74,6 +74,58 @@ export interface Database {
         Update: Record<string, unknown>;
         Relationships: [];
       };
+      family_invitations: {
+        Row: {
+          id: number;
+          family_id: number;
+          inviter_id: number | null;
+          invitee_contact: string;
+          invitee_contact_type: 1 | 2;
+          invite_code: string;
+          last_send_time: string | null;
+          expire_time: string;
+          status: 0 | 1 | -1;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          family_id: number;
+          inviter_id?: number | null;
+          invitee_contact: string;
+          invitee_contact_type: 1 | 2;
+          invite_code: string;
+          last_send_time?: string | null;
+          expire_time?: string;
+          status?: 0 | 1 | -1;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          family_id?: number;
+          inviter_id?: number | null;
+          invitee_contact?: string;
+          invitee_contact_type?: 1 | 2;
+          invite_code?: string;
+          last_send_time?: string | null;
+          expire_time?: string;
+          status?: 0 | 1 | -1;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "family_invitations_family_id_fkey";
+            columns: ["family_id"];
+            referencedRelation: "families";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "family_invitations_inviter_id_fkey";
+            columns: ["inviter_id"];
+            referencedRelation: "family_members";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       profiles: {
         Row: {
           id: string;
@@ -207,7 +259,60 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      get_my_family_id: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      get_my_pending_family_invitation: {
+        Args: Record<string, never>;
+        Returns: {
+          invitation_id: number;
+          family_id: number;
+          family_name: string;
+          family_avatar: string | null;
+          inviter_name: string | null;
+          expire_time: string;
+        }[];
+      };
+      accept_family_invitation: {
+        Args: {
+          p_invitation_id: number;
+        };
+        Returns: {
+          member_id: number;
+          family_id: number;
+        }[];
+      };
+      reject_family_invitation: {
+        Args: {
+          p_invitation_id: number;
+        };
+        Returns: boolean;
+      };
+      get_family_invitation_by_code: {
+        Args: {
+          p_invite_code: string;
+        };
+        Returns: {
+          invitation_id: number;
+          family_id: number;
+          family_name: string;
+          family_avatar: string | null;
+          inviter_name: string | null;
+          expire_time: string;
+        }[];
+      };
+      accept_family_invitation_by_code: {
+        Args: {
+          p_invite_code: string;
+        };
+        Returns: {
+          member_id: number;
+          family_id: number;
+        }[];
+      };
+    };
     Enums: Record<string, never>;
   };
 }

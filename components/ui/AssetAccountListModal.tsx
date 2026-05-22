@@ -10,9 +10,11 @@ import {
   PanResponder,
 } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { AddAssetAccountModal } from './AddAssetAccountModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -93,8 +95,17 @@ function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
 
   const panResponder = useRef(
     PanResponder.create({
+      // Don't claim on touch start — let taps reach children.
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+
+      // Claim horizontal drags. Use capture phase so we win against the
+      // outer vertical ScrollView before it locks the gesture.
       onMoveShouldSetPanResponder: (_evt, gesture) =>
-        Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        Math.abs(gesture.dx) > 5 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
+      onMoveShouldSetPanResponderCapture: (_evt, gesture) =>
+        Math.abs(gesture.dx) > 5 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
+
       onPanResponderMove: (_evt, gesture) => {
         const dx = Math.max(-ACTION_WIDTH, Math.min(0, gesture.dx));
         translateX.setValue(dx);
@@ -107,6 +118,9 @@ function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
       onPanResponderTerminate: () => {
         animateTo(openedRef.current);
       },
+      // Once we've started swiping, don't let the ScrollView steal the gesture.
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
     })
   ).current;
 
@@ -158,11 +172,13 @@ function SwipeRow({ children, onInvalidate, invalidating }: SwipeRowProps) {
 
 export function AssetAccountListModal({ visible, onClose }: Props) {
   const { user } = useAuthStore();
+  const insets = useSafeAreaInsets();
 
-  const [accounts, setAccounts]         = useState<AssetAccount[]>([]);
-  const [loading, setLoading]           = useState(false);
+  const [accounts, setAccounts]             = useState<AssetAccount[]>([]);
+  const [loading, setLoading]               = useState(false);
   const [invalidatingId, setInvalidatingId] = useState<number | null>(null);
-  const [confirmId, setConfirmId]       = useState<number | null>(null);
+  const [confirmId, setConfirmId]           = useState<number | null>(null);
+  const [addVisible, setAddVisible]         = useState(false);
 
   async function fetchAccounts() {
     if (!user) return;
@@ -234,7 +250,7 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
             flexDirection: 'row',
             alignItems: 'center',
             paddingHorizontal: 20,
-            paddingTop: Platform.OS === 'ios' ? 20 : 16,
+            paddingTop: 48,
             paddingBottom: 16,
             backgroundColor: '#F5F3FF',
           }}
@@ -249,11 +265,24 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
               fontSize: 17,
               fontWeight: '600',
               color: Colors.text.primary,
-              marginRight: 32,
             }}
           >
             我的资产账户
           </Text>
+          <TouchableOpacity
+            onPress={() => setAddVisible(true)}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              backgroundColor: Colors.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            accessibilityLabel="添加资产账户"
+          >
+            <Text style={{ fontSize: 20, color: '#fff', lineHeight: 24, marginTop: -1 }}>+</Text>
+          </TouchableOpacity>
         </View>
 
         {/* ── Content ── */}
@@ -425,6 +454,15 @@ export function AssetAccountListModal({ visible, onClose }: Props) {
           </View>
         )}
       </View>
+
+      {/* ── Add account modal ── */}
+      <AddAssetAccountModal
+        visible={addVisible}
+        onClose={() => {
+          setAddVisible(false);
+          fetchAccounts();
+        }}
+      />
     </Modal>
   );
 }

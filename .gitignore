@@ -25,6 +25,7 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+qa/artifacts/
 
 # macOS
 .DS_Store
@@ -33,6 +34,10 @@ yarn-error.*
 # local env files
 .env
 .env*.local
+
+# EAS / signing credentials — NEVER commit
+credentials.json
+credentials/
 
 # typescript
 *.tsbuildinfo

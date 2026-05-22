@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { buildTrendPeriods, getValueAtDate, type TrendGranularity } from '@/lib/trendTime';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 
 export interface MemberSummary {
   memberId: number;
@@ -12,8 +14,16 @@ export interface MemberSummary {
 
 export interface AssetSegmentData {
   label: string;
+  amount: number;
   percent: number;
   color: string;
+}
+
+export interface HomeTrendPoint {
+  label: string;
+  totalAmount: number;
+  typeAmounts: Record<string, number>;
+  quadrantAmounts: Record<string, number>;
 }
 
 export interface HomeData {
@@ -23,6 +33,14 @@ export interface HomeData {
   disposablePercent: number;
   members: MemberSummary[];
   segments: AssetSegmentData[];
+  quadrantSegments: AssetSegmentData[];
+  trendPoints: Record<TrendGranularity, HomeTrendPoint[]>;
+}
+
+interface SnapshotRow {
+  account_id: number;
+  snapshot_date: string;
+  amount: number;
 }
 
 // Colors assigned to each account_type
@@ -39,10 +57,20 @@ const TYPE_COLORS: Record<string, string> = {
   '其他':    '#D1D5DB',
 };
 
+const QUADRANT_COLORS: Record<string, string> = {
+  'A类保值': '#8B5CF6',
+  'B类消费': '#FB923C',
+  'C类投资': '#F59E0B',
+  'D类保障': '#14B8A6',
+};
+
+const QUADRANT_LABELS = ['A类保值', 'B类消费', 'C类投资', 'D类保障'];
+
 // Types that are generally locked / non-disposable
 const LOCKED_TYPES = new Set(['公积金', '期权']);
 
 export function useHomeData() {
+  const { user } = useAuthStore();
   const profileVersion = useAppStore((state) => state.profileVersion);
   const [data, setData] = useState<HomeData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,12 +82,8 @@ export function useHomeData() {
     try {
       const today = new Date();
       const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-      // Fetch snapshots starting from the previous month so we have start-of-month baseline
-      const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-        .toISOString()
-        .split('T')[0];
 
-      // Parallel: family members, asset accounts, recent snapshots
+      // Parallel: family members, asset accounts, snapshots
       const [membersRes, accountsRes, snapshotsRes] = await Promise.all([
         supabase
           .from('family_members')
@@ -72,8 +96,7 @@ export function useHomeData() {
         supabase
           .from('asset_daily_snapshots')
           .select('account_id, snapshot_date, amount')
-          .gte('snapshot_date', prevMonthStart)
-          .order('snapshot_date', { ascending: false }),
+          .order('snapshot_date', { ascending: true }),
       ]);
 
       if (membersRes.error) throw membersRes.error;
@@ -82,7 +105,7 @@ export function useHomeData() {
 
       const familyMembers = membersRes.data ?? [];
       const accounts = accountsRes.data ?? [];
-      const snapshots = snapshotsRes.data ?? [];
+      const snapshots = (snapshotsRes.data ?? []) as SnapshotRow[];
 
       // Fetch profiles for members that have a user_id
       const userIds = familyMembers
@@ -103,19 +126,21 @@ export function useHomeData() {
         (profilesRes.data ?? []).map((p) => [p.id, p])
       );
 
-      // Build latest amount per account (snapshots already sorted DESC by date)
+      // Build amount per account using each account's own latest snapshot.
       const latestByAccount = new Map<number, number>();
       const startOfMonthByAccount = new Map<number, number>();
+      const snapshotsByAccount = new Map<number, SnapshotRow[]>();
 
       for (const snap of snapshots) {
-        const aid = snap.account_id;
-        if (!latestByAccount.has(aid)) {
-          latestByAccount.set(aid, Number(snap.amount));
-        }
+        latestByAccount.set(snap.account_id, Number(snap.amount));
+
+        const existingSnapshots = snapshotsByAccount.get(snap.account_id) ?? [];
+        existingSnapshots.push(snap);
+        snapshotsByAccount.set(snap.account_id, existingSnapshots);
       }
 
       // For start-of-month baseline: iterate ascending, keep last value <= firstOfMonth
-      for (const snap of [...snapshots].reverse()) {
+      for (const snap of snapshots) {
         if (snap.snapshot_date <= firstOfMonth) {
           startOfMonthByAccount.set(snap.account_id, Number(snap.amount));
         }
@@ -125,6 +150,7 @@ export function useHomeData() {
       let totalAssets = 0;
       let lockedAmount = 0;
       const typeAmounts = new Map<string, number>();
+      const quadrantAmounts = new Map<string, number>();
       const memberAmounts = new Map<number, number>();
 
       for (const acc of accounts) {
@@ -140,6 +166,12 @@ export function useHomeData() {
           acc.account_type,
           (typeAmounts.get(acc.account_type) ?? 0) + amount
         );
+        if (acc.asset_quadrant) {
+          quadrantAmounts.set(
+            acc.asset_quadrant,
+            (quadrantAmounts.get(acc.asset_quadrant) ?? 0) + amount
+          );
+        }
         memberAmounts.set(
           acc.member_id,
           (memberAmounts.get(acc.member_id) ?? 0) + amount
@@ -153,6 +185,61 @@ export function useHomeData() {
       }
       const monthGrowth = totalAssets - startTotal;
 
+      const monthlyPeriods = buildTrendPeriods(
+        snapshots.map((snapshot) => snapshot.snapshot_date),
+        'month',
+      );
+
+      const getYearlyBConsumptionTotal = (account: { id: number }, yearText: string) => {
+        const accountSnapshots = snapshotsByAccount.get(account.id) ?? [];
+        const yearMonths = monthlyPeriods.filter((period) => period.key.startsWith(`${yearText}-`));
+
+        return yearMonths.reduce(
+          (sum, period) => sum + getValueAtDate(accountSnapshots, period.dateText),
+          0,
+        );
+      };
+
+      const buildTrendPointsForGranularity = (granularity: TrendGranularity): HomeTrendPoint[] => {
+        const periods = granularity === 'month'
+          ? monthlyPeriods
+          : buildTrendPeriods(
+              snapshots.map((snapshot) => snapshot.snapshot_date),
+              'year',
+            );
+
+        return periods.map((period) => {
+          let totalAmount = 0;
+          const trendTypeAmounts: Record<string, number> = {};
+          const trendQuadrantAmounts: Record<string, number> = {};
+
+          for (const account of accounts) {
+            const amount = getValueAtDate(snapshotsByAccount.get(account.id) ?? [], period.dateText);
+            totalAmount += amount;
+            trendTypeAmounts[account.account_type] = (trendTypeAmounts[account.account_type] ?? 0) + amount;
+            if (account.asset_quadrant) {
+              const quadrantAmount = granularity === 'year' && account.asset_quadrant === 'B类消费'
+                ? getYearlyBConsumptionTotal(account, period.key)
+                : amount;
+
+              trendQuadrantAmounts[account.asset_quadrant] = (trendQuadrantAmounts[account.asset_quadrant] ?? 0) + quadrantAmount;
+            }
+          }
+
+          return {
+            label: period.label,
+            totalAmount,
+            typeAmounts: trendTypeAmounts,
+            quadrantAmounts: trendQuadrantAmounts,
+          };
+        });
+      };
+
+      const trendPoints: Record<TrendGranularity, HomeTrendPoint[]> = {
+        month: buildTrendPointsForGranularity('month'),
+        year: buildTrendPointsForGranularity('year'),
+      };
+
       // Disposable
       const disposableAmount = totalAssets - lockedAmount;
       const disposablePercent =
@@ -164,6 +251,7 @@ export function useHomeData() {
         if (amount <= 0) continue;
         segments.push({
           label: type,
+          amount,
           percent:
             totalAssets > 0
               ? parseFloat(((amount / totalAssets) * 100).toFixed(1))
@@ -172,6 +260,21 @@ export function useHomeData() {
         });
       }
       segments.sort((a, b) => b.percent - a.percent);
+
+      const quadrantSegments: AssetSegmentData[] = QUADRANT_LABELS
+        .map((label) => {
+          const amount = quadrantAmounts.get(label) ?? 0;
+          return {
+            label,
+            amount,
+            percent:
+              totalAssets > 0
+                ? parseFloat(((amount / totalAssets) * 100).toFixed(1))
+                : 0,
+            color: QUADRANT_COLORS[label] ?? '#D1D5DB',
+          };
+        })
+        .filter((segment) => segment.amount > 0);
 
       // Member summaries
       const members: MemberSummary[] = familyMembers
@@ -198,6 +301,8 @@ export function useHomeData() {
         disposablePercent,
         members,
         segments,
+        quadrantSegments,
+        trendPoints,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '加载失败';
@@ -210,6 +315,39 @@ export function useHomeData() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`home-data-refresh-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asset_daily_snapshots' },
+        () => {
+          fetchData();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asset_accounts' },
+        () => {
+          fetchData();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'family_members' },
+        () => {
+          fetchData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchData, user?.id]);
 
   return { data, isLoading, error, refetch: fetchData };
 }

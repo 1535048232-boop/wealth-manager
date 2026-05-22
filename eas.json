@@ -1,0 +1,45 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "android": {
+        "buildType": "apk",
+        "distribution": "internal"
+      },
+      "ios": {
+        "simulator": false,
+        "distribution": "internal"
+      }
+    },
+    "ios-simulator": {
+      "ios": {
+        "simulator": true
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "ios": {}
+    }
+  },
+  "submit": {
+      "production": {
+        "ios": {
+          "ascAppId": "6764475411"
+        },
+        "android": {
+          "serviceAccountKeyPath": "./credentials/android/service-account.json",
+          "track": "internal"
+      }
+    }
+  }
+}

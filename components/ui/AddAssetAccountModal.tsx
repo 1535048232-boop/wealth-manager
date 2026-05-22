@@ -567,6 +567,8 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
       visible={visible}
       animationType="slide"
       transparent
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
       onRequestClose={handleClose}
     >
       {/* Backdrop – tap outside to close (only on type-select) */}

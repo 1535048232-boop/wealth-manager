@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, Switch, Platform, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Platform, Modal, ActivityIndicator, Alert } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
@@ -22,6 +22,20 @@ type FamilyMember = {
   role: 'admin' | 'member' | 'guest';
   joinSource: 'creator' | 'invite';
   status: 1 | 0 | -1;
+  isCurrentUser: boolean;
+};
+
+type FamilyInvitation = {
+  id: number;
+  inviterId: number | null;
+  inviteeContact: string;
+  inviteeContactType: 1 | 2;
+  status: 0 | 1 | -1;
+  lastSendTime: string | null;
+  expireTime: string;
+  createdAt: string;
+  inviterDisplayName: string | null;
+  inviterRole: 'admin' | 'member' | 'guest' | null;
 };
 
 type AssetAccountType = '银行卡' | '支付宝' | '微信' | '公积金' | '股票' | '期权' | '现金' | '保险' | '基金' | '其他';
@@ -77,38 +91,14 @@ function SettingRow({
       className={`flex-row items-center px-4 py-3.5 ${!last ? 'border-b border-gray-50' : ''}`}
     >
       <View className="flex-1">
-        <Text className="text-sm font-medium text-gray-900">{label}</Text>
-        {sublabel ? <Text className="text-xs text-gray-400 mt-0.5">{sublabel}</Text> : null}
+        <Text className="text-[14px] font-medium text-gray-900">{label}</Text>
+        {sublabel ? <Text className="text-[14px] text-gray-400 mt-0.5">{sublabel}</Text> : null}
       </View>
       {value}
       {onPress ? (
         <Text className="text-gray-300 text-base ml-1">›</Text>
       ) : null}
     </TouchableOpacity>
-  );
-}
-
-function ToggleRow({ label, sublabel, value, onChange, last = false }: {
-  label: string;
-  sublabel?: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-  last?: boolean;
-}) {
-  return (
-    <View className={`flex-row items-center px-4 py-3 ${!last ? 'border-b border-gray-50' : ''}`}>
-      <View className="flex-1">
-        <Text className="text-sm font-medium text-gray-900">{label}</Text>
-        {sublabel ? <Text className="text-xs text-gray-400 mt-0.5">{sublabel}</Text> : null}
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: '#E5E7EB', true: Colors.primaryLight }}
-        thumbColor={Platform.OS === 'android' ? (value ? Colors.primary : '#fff') : '#fff'}
-        ios_backgroundColor="#E5E7EB"
-      />
-    </View>
   );
 }
 
@@ -121,93 +111,184 @@ export default function ProfileScreen() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [family, setFamily] = useState<Family | null>(null);
-  const [biometric, setBiometric] = useState(false);
-  const [repaymentReminder, setRepaymentReminder] = useState(true);
-  const [monthlyReport, setMonthlyReport] = useState(true);
   const [showCreateFamily, setShowCreateFamily] = useState(false);
   const [familyModalMode, setFamilyModalMode] = useState<'create' | 'view'>('create');
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAssetList, setShowAssetList] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [familyMembersLoading, setFamilyMembersLoading] = useState(false);
+  const [familyInvitations, setFamilyInvitations] = useState<FamilyInvitation[]>([]);
+  const [familyInvitationsLoading, setFamilyInvitationsLoading] = useState(false);
   const [showFamilyMembers, setShowFamilyMembers] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [nowTs, setNowTs] = useState(Date.now());
   const [assetAccountCount, setAssetAccountCount] = useState(0);
   const [assetPreviewAccounts, setAssetPreviewAccounts] = useState<Array<{ id: number; account_type: AssetAccountType }>>([]);
+  const [currentFamilyRole, setCurrentFamilyRole] = useState<'admin' | 'member' | 'guest' | null>(null);
+  const [currentMemberId, setCurrentMemberId] = useState<number | null>(null);
+
+  function logFamilyMembersDebug(stage: string, payload?: unknown) {
+    if (!__DEV__) return;
+    console.log(`[ProfileScreen][loadFamily] ${stage}`, payload);
+  }
 
   async function loadFamily() {
     if (!user) return;
-
-    // Step 1: find the member row by profile_id
-    const { data: memberData } = await supabase
-      .from('family_members')
-      .select('family_id')
-      .eq('profile_id', user.id)
-      .eq('status', 1)
-      .maybeSingle();
-
-    if (!memberData?.family_id) {
-      setFamily(null);
-      setFamilyMembers([]);
-      return;
-    }
-
-    // Step 2: fetch full family details by family_id
-    const { data: familyData } = await supabase
-      .from('families')
-      .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
-      .eq('id', memberData.family_id)
-      .maybeSingle();
-
-    const f = familyData as {
-      id: number;
-      family_name: string;
-      family_avatar: string | null;
-      currency: string;
-      debt_warning_threshold: number;
-      repayment_reminder_switch: 0 | 1;
-      data_export_switch: 0 | 1;
-    } | null;
-
-    if (f) setFamily({
-      id: f.id,
-      family_name: f.family_name,
-      family_avatar: f.family_avatar,
-      currency: f.currency,
-      debt_warning_threshold: Number(f.debt_warning_threshold),
-      repayment_reminder_switch: f.repayment_reminder_switch,
-      data_export_switch: f.data_export_switch,
-    });
-    else setFamily(null);
-
-    // Step 3: fetch active family members for UI preview/list
-    setFamilyMembersLoading(true);
     try {
-      const { data: membersData } = await supabase
+      logFamilyMembersDebug('start', { userId: user.id });
+
+      const { data: memberData, error: memberError } = await supabase
         .from('family_members')
-        .select('id, role, join_source, status, profiles:profile_id(display_name, avatar_url)')
-        .eq('family_id', memberData.family_id)
-        .in('status', [1, -1])
-        .order('id', { ascending: true });
+        .select('id, family_id, role')
+        .eq('profile_id', user.id)
+        .eq('status', 1)
+        .maybeSingle();
 
-      const members = (membersData ?? []).map((row: any) => {
-        const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-        return {
-          id: row.id as number,
-          displayName: profile?.display_name ?? `成员${row.id}`,
-          avatarUrl: profile?.avatar_url ?? null,
-          role: (row.role ?? 'member') as 'admin' | 'member' | 'guest',
-          joinSource: (row.join_source ?? 'invite') as 'creator' | 'invite',
-          status: (row.status ?? 1) as 1 | 0 | -1,
-        } satisfies FamilyMember;
-      }).sort((a, b) => {
-        const roleOrder = { admin: 0, member: 1, guest: 2 } as const;
-        return roleOrder[a.role] - roleOrder[b.role] || a.id - b.id;
+      logFamilyMembersDebug('step1 member row', { memberData, memberError });
+
+      if (memberError) throw memberError;
+
+      if (!memberData?.family_id) {
+        logFamilyMembersDebug('stop no family_id', { memberData });
+        setFamily(null);
+        setCurrentFamilyRole(null);
+        setFamilyMembers([]);
+        setFamilyInvitations([]);
+        return;
+      }
+
+      setCurrentFamilyRole((memberData.role ?? null) as 'admin' | 'member' | 'guest' | null);
+      setCurrentMemberId(memberData.id as number);
+
+      const { data: familyData, error: familyError } = await supabase
+        .from('families')
+        .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
+        .eq('id', memberData.family_id)
+        .maybeSingle();
+
+      logFamilyMembersDebug('step2 family row', { familyId: memberData.family_id, familyData, familyError });
+
+      if (familyError) throw familyError;
+
+      const f = familyData as {
+        id: number;
+        family_name: string;
+        family_avatar: string | null;
+        currency: string;
+        debt_warning_threshold: number;
+        repayment_reminder_switch: 0 | 1;
+        data_export_switch: 0 | 1;
+      } | null;
+
+      if (f) setFamily({
+        id: f.id,
+        family_name: f.family_name,
+        family_avatar: f.family_avatar,
+        currency: f.currency,
+        debt_warning_threshold: Number(f.debt_warning_threshold),
+        repayment_reminder_switch: f.repayment_reminder_switch,
+        data_export_switch: f.data_export_switch,
       });
+      else setFamily(null);
 
-      setFamilyMembers(members);
-    } finally {
-      setFamilyMembersLoading(false);
+      setFamilyMembersLoading(true);
+      try {
+        const { data: membersData, error: membersError } = await supabase
+          .from('family_members')
+          .select('id, role, join_source, status, profile_id, user_id, profiles:profile_id(display_name, avatar_url)')
+          .eq('family_id', memberData.family_id)
+          .in('status', [1, -1])
+          .order('id', { ascending: true });
+
+        logFamilyMembersDebug('step3 raw members', {
+          familyId: memberData.family_id,
+          count: membersData?.length ?? 0,
+          membersError,
+          membersData,
+        });
+
+        if (membersError) throw membersError;
+
+        const members = (membersData ?? []).map((row: any) => {
+          const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+          return {
+            id: row.id as number,
+            displayName: profile?.display_name ?? `成员${row.id}`,
+            avatarUrl: profile?.avatar_url ?? null,
+            role: (row.role ?? 'member') as 'admin' | 'member' | 'guest',
+            joinSource: (row.join_source ?? 'invite') as 'creator' | 'invite',
+            status: (row.status ?? 1) as 1 | 0 | -1,
+            isCurrentUser: row.profile_id === user.id || row.user_id === user.id,
+          } satisfies FamilyMember;
+        }).sort((a, b) => {
+          const roleOrder = { admin: 0, member: 1, guest: 2 } as const;
+          return roleOrder[a.role] - roleOrder[b.role] || a.id - b.id;
+        });
+
+        logFamilyMembersDebug('step3 mapped members', members);
+        setFamilyMembers(members);
+      } finally {
+        setFamilyMembersLoading(false);
+      }
+
+      setFamilyInvitationsLoading(true);
+      try {
+        const { data: invitationsData, error: invitationsError } = await supabase
+        .from('family_invitations')
+        .select('id, inviter_id, invitee_contact, invitee_contact_type, status, last_send_time, expire_time, created_at, inviter:inviter_id(role, profiles:profile_id(display_name))')
+        .eq('family_id', memberData.family_id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+        logFamilyMembersDebug('step4 invitations', {
+          familyId: memberData.family_id,
+          count: invitationsData?.length ?? 0,
+          invitationsError,
+        });
+
+        if (invitationsError) throw invitationsError;
+
+        const invitations = (invitationsData ?? []).map((row: any) => {
+          const inviter = Array.isArray(row.inviter) ? row.inviter[0] : row.inviter;
+          const inviterProfile = inviter ? (Array.isArray(inviter.profiles) ? inviter.profiles[0] : inviter.profiles) : null;
+          return {
+            id: row.id as number,
+            inviterId: (row.inviter_id ?? null) as number | null,
+            inviteeContact: row.invitee_contact as string,
+            inviteeContactType: (row.invitee_contact_type ?? 1) as 1 | 2,
+            status: (row.status ?? 0) as 0 | 1 | -1,
+            lastSendTime: (row.last_send_time ?? null) as string | null,
+            expireTime: row.expire_time as string,
+            createdAt: row.created_at as string,
+            inviterDisplayName: (inviterProfile?.display_name ?? null) as string | null,
+            inviterRole: (inviter?.role ?? null) as 'admin' | 'member' | 'guest' | null,
+          } satisfies FamilyInvitation;
+        });
+
+        setFamilyInvitations(invitations);
+      } finally {
+        setFamilyInvitationsLoading(false);
+      }
+    } catch (error) {
+      logFamilyMembersDebug('error', error);
+      console.error('[ProfileScreen] loadFamily failed:', error);
+    }
+  }
+
+  async function revokeInvitation(invitationId: number) {
+    try {
+      const { error } = await supabase
+        .from('family_invitations')
+        .update({ status: -1 })
+        .eq('id', invitationId);
+
+      if (error) throw error;
+
+      await loadFamily();
+      Alert.alert('撤销成功', '该邀请已撤销');
+    } catch (error) {
+      console.error('[ProfileScreen] revokeInvitation failed:', error);
+      Alert.alert('操作失败', '撤销邀请失败，请稍后重试');
     }
   }
 
@@ -249,10 +330,82 @@ export default function ProfileScreen() {
     loadAssetAccountsPreview();
   }, [user?.id, profileVersion]);
 
+  useEffect(() => {
+    if (!showFamilyMembers) return;
+    setNowTs(Date.now());
+    const timer = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [showFamilyMembers]);
+
+  useEffect(() => {
+    if (!showFamilyMembers) return;
+    loadFamily();
+  }, [showFamilyMembers]);
+
+  function maskInviteeContact(contact: string, contactType: 1 | 2) {
+    if (contactType === 1) {
+      const phone = contact.replace(/\s+/g, '');
+      if (phone.length < 7) return contact;
+      return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+    }
+
+    const [localPart, domain] = contact.split('@');
+    if (!localPart || !domain) return contact;
+    const visiblePrefix = localPart.slice(0, Math.min(2, localPart.length));
+    return `${visiblePrefix}***@${domain}`;
+  }
+
+  function formatInviteDate(dateText: string) {
+    const date = new Date(dateText);
+    if (Number.isNaN(date.getTime())) return '--';
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mi = String(date.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  }
+
+  function formatRemainingTime(expireTime: string) {
+    const expire = new Date(expireTime).getTime();
+    if (Number.isNaN(expire)) return '--:--:--';
+
+    const diffMs = expire - nowTs;
+    if (diffMs <= 0) return '00:00:00';
+
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  function getInvitationStatusMeta(item: FamilyInvitation) {
+    const isExpired = item.status === 0 && new Date(item.expireTime).getTime() <= nowTs;
+
+    if (item.status === 1) {
+      return { label: '已接受', color: '#16A34A', bg: '#DCFCE7', actionable: false };
+    }
+
+    if (item.status === -1 || isExpired) {
+      return { label: '已过期', color: '#EF4444', bg: '#FEE2E2', actionable: false };
+    }
+
+    return { label: '待确认', color: '#F59E0B', bg: '#FEF3C7', actionable: true };
+  }
+
+  function getRoleLabel(role: FamilyInvitation['inviterRole']) {
+    if (role === 'admin') return '超级管理员';
+    if (role === 'member') return '普通成员';
+    if (role === 'guest') return '受限成员';
+    return null;
+  }
+
   const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? '用户';
   const hasAvatar = !!profile?.avatar_url;
   const activeMembers = familyMembers.filter((m) => m.status === 1);
   const previewMembers = activeMembers.slice(0, 2);
+  const canInviteFamilyMembers = currentFamilyRole === 'admin';
   const previewNameText =
     activeMembers.length > 0
       ? `${previewMembers.map((m) => m.displayName).join('、')}${activeMembers.length > 2 ? ` 等${activeMembers.length}人` : ''}`
@@ -264,7 +417,7 @@ export default function ProfileScreen() {
 
         {/* ── Header ── */}
         <View className="flex-row items-center justify-between px-5 pt-4 pb-2">
-          <Text className="text-2xl font-bold text-gray-900">设置</Text>
+          <Text className="text-[22px] font-bold text-gray-900">设置</Text>
           <Avatar uri={profile?.avatar_url} name={hasAvatar ? displayName : undefined} showCamera={!hasAvatar} size="md" />
         </View>
 
@@ -284,25 +437,13 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── 账户安全 ── */}
-        <SectionHeader title="账户安全" />
-        <RowCard>
-          <ToggleRow
-            label="人脸识别 / 指纹解锁"
-            value={biometric}
-            onChange={setBiometric}
-          />
-          <SettingRow label="支付密码" onPress={() => {}} />
-          <SettingRow
-            label="隐私模式"
-            sublabel="快速隐藏敏感数据"
-            onPress={() => {}}
-            last
-          />
-        </RowCard>
-
         {/* ── 家庭管理 ── */}
-        <SectionHeader title="家庭管理" />
+        <Text
+          className="font-semibold text-gray-400 uppercase tracking-widest px-5 pt-6 pb-2"
+          style={{ fontSize: 14 }}
+        >
+          家庭管理
+        </Text>
         <RowCard>
           <SettingRow
             label={family ? '家庭设置' : '创建家庭'}
@@ -399,48 +540,6 @@ export default function ProfileScreen() {
           />
         </RowCard>
 
-        {/* ── 通知提醒 ── */}
-        <SectionHeader title="通知提醒" />
-        <RowCard>
-          <ToggleRow label="还款日提醒" value={repaymentReminder} onChange={setRepaymentReminder} />
-          <ToggleRow label="月度报告推送" value={monthlyReport} onChange={setMonthlyReport} />
-          <SettingRow
-            label="大额支出预警"
-            value={<Text className="text-sm text-gray-400 mr-1">¥10,000</Text>}
-            onPress={() => {}}
-            last
-          />
-        </RowCard>
-
-        {/* ── 外观 ── */}
-        <SectionHeader title="外观" />
-        <RowCard>
-          <SettingRow
-            label="主题切换"
-            value={<Text className="text-sm text-gray-400 mr-1">🌙</Text>}
-            onPress={() => {}}
-          />
-          <SettingRow
-            label="配色方案"
-            value={
-              <View className="flex-row items-center mr-1">
-                <View className="w-3 h-3 rounded-full mr-1.5" style={{ backgroundColor: Colors.primary }} />
-                <Text className="text-sm text-gray-400">柔雾紫境</Text>
-              </View>
-            }
-            onPress={() => {}}
-            last
-          />
-        </RowCard>
-
-        {/* ── 其他 ── */}
-        <SectionHeader title="其他" />
-        <RowCard>
-          <SettingRow label="数据导出" onPress={() => {}} />
-          <SettingRow label="帮助与反馈" onPress={() => {}} />
-          <SettingRow label="关于盈家" onPress={() => {}} last />
-        </RowCard>
-
         {/* ── 退出登录 ── */}
         <TouchableOpacity
           onPress={signOut}
@@ -493,29 +592,49 @@ export default function ProfileScreen() {
         onRequestClose={() => setShowFamilyMembers(false)}
       >
         <View style={{ flex: 1, backgroundColor: '#E9E8FF' }}>
-          <View className="px-5" style={{ paddingTop: Platform.OS === 'ios' ? 58 : 24, paddingBottom: 10 }}>
+          <View className="px-5" style={{ paddingTop: 48, paddingBottom: 10 }}>
             <View className="flex-row items-center justify-between">
               <TouchableOpacity onPress={() => setShowFamilyMembers(false)} className="w-9 h-9 rounded-full items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.45)' }}>
                 <Text className="text-gray-500 text-xl">‹</Text>
               </TouchableOpacity>
-              <Text className="text-[28px] font-bold text-gray-900">家庭成员</Text>
-              <TouchableOpacity className="px-4 py-2 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}>
-                <Text className="text-sm font-medium" style={{ color: Colors.primary }}>添加成员</Text>
-              </TouchableOpacity>
+              <Text className="text-[22px] font-bold text-gray-900">家庭成员</Text>
+              {canInviteFamilyMembers ? (
+                <TouchableOpacity
+                  className="px-4 py-2 rounded-full"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}
+                  onPress={() => {
+                    setShowFamilyMembers(false);
+                    router.push('/(tabs)/family-invite');
+                  }}
+                >
+                  <Text className="text-sm font-medium" style={{ color: Colors.primary }}>添加成员</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={{ width: 72 }} />
+              )}
             </View>
           </View>
 
-          {familyMembers.length === 0 ? (
-            <View className="flex-1 items-center justify-center px-6">
-              <Text className="text-base font-semibold text-gray-700">暂无家庭成员</Text>
-              <Text className="text-sm text-gray-500 mt-2">点击右上角添加成员</Text>
-            </View>
-          ) : (
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: Platform.OS === 'ios' ? 28 : 20 }}
-            >
-              {familyMembers.map((member) => {
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: Platform.OS === 'ios' ? 28 : 20 }}
+          >
+            <Text className="text-sm font-semibold text-gray-600 px-1 mb-2">成员列表</Text>
+
+            {familyMembers.length === 0 ? (
+              <View
+                className="rounded-3xl px-4 py-5 mb-4"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.7)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.6)',
+                }}
+              >
+                <Text className="text-base font-semibold text-gray-700">暂无家庭成员</Text>
+                <Text className="text-sm text-gray-500 mt-2">{canInviteFamilyMembers ? '点击右上角添加成员' : '当前暂无可见成员'}</Text>
+              </View>
+            ) : (
+              familyMembers.map((member) => {
                 const roleMeta: Record<FamilyMember['role'], { label: string; icon: string; bg: string; color: string }> = {
                   admin: { label: '超级管理员', icon: 'crown', bg: '#EDE9FE', color: '#7C3AED' },
                   member: { label: '普通成员', icon: 'account', bg: '#DBEAFE', color: '#2563EB' },
@@ -537,9 +656,9 @@ export default function ProfileScreen() {
                     key={member.id}
                     className="rounded-3xl px-4 py-3.5 mb-3.5 flex-row items-center"
                     style={{
-                      backgroundColor: 'rgba(255,255,255,0.7)',
+                      backgroundColor: member.isCurrentUser ? 'rgba(255,255,255,0.7)' : 'rgba(229,231,235,0.88)',
                       borderWidth: 1,
-                      borderColor: 'rgba(255,255,255,0.6)',
+                      borderColor: member.isCurrentUser ? 'rgba(255,255,255,0.6)' : 'rgba(209,213,219,0.95)',
                     }}
                   >
                     <Avatar uri={member.avatarUrl} name={member.displayName} size="md" />
@@ -563,15 +682,12 @@ export default function ProfileScreen() {
                       </View>
 
                       <View className="flex-row items-center mt-1.5">
-                        <View className="flex-row items-center mr-3">
-                          <MaterialCommunityIcons name={sourceMeta.icon as any} size={13} color="#9CA3AF" />
-                          <Text className="text-xs text-gray-400 ml-1">{sourceMeta.label}</Text>
-                        </View>
-
-                        <View className="flex-row items-center mr-3">
-                          <MaterialCommunityIcons name="account-arrow-right" size={13} color="#9CA3AF" />
-                          <Text className="text-xs text-gray-400 ml-1">邀请</Text>
-                        </View>
+                        {canInviteFamilyMembers ? (
+                          <View className="flex-row items-center mr-3">
+                            <MaterialCommunityIcons name={sourceMeta.icon as any} size={13} color="#9CA3AF" />
+                            <Text className="text-xs text-gray-400 ml-1">{sourceMeta.label}</Text>
+                          </View>
+                        ) : null}
 
                         <View className="flex-row items-center">
                           <MaterialCommunityIcons name={statusMeta.icon as any} size={13} color={statusMeta.color} />
@@ -590,9 +706,113 @@ export default function ProfileScreen() {
                     </TouchableOpacity>
                   </View>
                 );
-              })}
-            </ScrollView>
-          )}
+              })
+            )}
+
+            {canInviteFamilyMembers ? (
+              <View className="mt-1 mb-2 px-1 flex-row items-center justify-between">
+                <Text className="text-sm font-semibold text-gray-600">邀请记录</Text>
+                {familyInvitationsLoading ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Text className="text-xs text-gray-400">共 {familyInvitations.length} 条</Text>
+                )}
+              </View>
+            ) : null}
+
+            {canInviteFamilyMembers ? (
+              !familyInvitationsLoading && familyInvitations.length === 0 ? (
+              <View
+                className="rounded-3xl px-4 py-5"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.7)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.6)',
+                }}
+              >
+                <Text className="text-base font-semibold text-gray-700">暂无邀请记录</Text>
+                <Text className="text-sm text-gray-500 mt-2">添加成员后可查看最近邀请状态</Text>
+              </View>
+            ) : (
+              familyInvitations.map((invitation) => {
+                const statusMeta = getInvitationStatusMeta(invitation);
+                const sendTimeText = formatInviteDate(invitation.lastSendTime ?? invitation.createdAt);
+
+                return (
+                  <View
+                    key={invitation.id}
+                    className="rounded-3xl px-4 py-3.5 mb-3.5"
+                    style={{
+                      backgroundColor: 'rgba(255,255,255,0.7)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(255,255,255,0.6)',
+                    }}
+                  >
+                    <View className="flex-row items-start justify-between">
+                      <View className="flex-1 pr-3">
+                        <Text className="text-[15px] font-semibold text-gray-800">
+                          邀请人: {invitation.inviterDisplayName ?? '未知成员'}
+                          {getRoleLabel(invitation.inviterRole) ? `（${getRoleLabel(invitation.inviterRole)}）` : ''}
+                        </Text>
+
+                        <Text className="text-sm text-gray-600 mt-2">
+                          发送时间: {sendTimeText}
+                        </Text>
+                        {statusMeta.actionable ? (
+                          <Text className="text-sm text-gray-600 mt-1">
+                            剩余: {formatRemainingTime(invitation.expireTime)}
+                          </Text>
+                        ) : null}
+                        <Text className="text-xs text-gray-400 mt-1.5">
+                          被邀请人联系方式: {maskInviteeContact(invitation.inviteeContact, invitation.inviteeContactType)}
+                        </Text>
+                      </View>
+
+                      {invitation.inviterId === currentMemberId && statusMeta.actionable ? (
+                        <View>
+                          <View className="self-end px-2.5 py-1 rounded-full mb-2" style={{ backgroundColor: statusMeta.bg }}>
+                            <Text className="text-[11px] font-semibold" style={{ color: statusMeta.color }}>
+                              {statusMeta.label}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            className="px-3.5 py-2 rounded-full mb-2"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                            onPress={() => {
+                              setShowFamilyMembers(false);
+                              router.push('/(tabs)/family-invite');
+                            }}
+                          >
+                            <Text className="text-sm font-semibold text-gray-700">重新发送</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            className="px-3.5 py-2 rounded-full"
+                            style={{ backgroundColor: '#FFFFFF' }}
+                            onPress={() => {
+                              Alert.alert('撤销邀请', '确认撤销该邀请吗？', [
+                                { text: '取消', style: 'cancel' },
+                                { text: '确认', style: 'destructive', onPress: () => revokeInvitation(invitation.id) },
+                              ]);
+                            }}
+                          >
+                            <Text className="text-sm font-semibold text-gray-700">撤销邀请</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <View className="px-2.5 py-1 rounded-full" style={{ backgroundColor: statusMeta.bg }}>
+                          <Text className="text-[11px] font-semibold" style={{ color: statusMeta.color }}>
+                            {statusMeta.label}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )
+            ) : null}
+          </ScrollView>
         </View>
       </Modal>
     </ScreenWrapper>

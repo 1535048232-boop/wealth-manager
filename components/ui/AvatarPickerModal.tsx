@@ -12,8 +12,8 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { Avatar } from './Avatar';
-import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
+import { saveProfileAvatarUrl, uploadProfileAvatar } from '@/lib/profileAvatar';
 
 interface AvatarPickerModalProps {
   visible: boolean;
@@ -25,14 +25,6 @@ interface AvatarPickerModalProps {
 }
 
 const DECORATIONS = ['🐷', '🏠', '🪙', '💰', '🐽', '🏡', '💸', '👨‍👩‍👧', '👫', '👨‍👩‍👧‍👦', '👨‍👩‍👦', '👨‍👩‍👧'];
-
-function inferExtension(uri: string, mimeType?: string | null) {
-  if (mimeType === 'image/png') return 'png';
-  if (mimeType === 'image/webp') return 'webp';
-  if (uri.toLowerCase().endsWith('.png')) return 'png';
-  if (uri.toLowerCase().endsWith('.webp')) return 'webp';
-  return 'jpg';
-}
 
 export function AvatarPickerModal({
   visible,
@@ -53,14 +45,7 @@ export function AvatarPickerModal({
       return;
     }
 
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ avatar_url: nextAvatarUrl })
-      .eq('id', userId);
-
-    if (updateError) {
-      throw new Error(updateError.message);
-    }
+    await saveProfileAvatarUrl(userId, nextAvatarUrl);
 
     onUploaded(nextAvatarUrl);
     bumpProfileVersion();
@@ -68,7 +53,7 @@ export function AvatarPickerModal({
     Alert.alert('成功', successMsg);
   }
 
-  async function uploadAvatar(uri: string, mimeType?: string | null) {
+  async function uploadAvatar(uri: string, mimeType?: string | null, base64Data?: string | null) {
     if (!userId) {
       Alert.alert('提示', '请先登录后再上传头像');
       return;
@@ -76,28 +61,11 @@ export function AvatarPickerModal({
 
     setUploading(true);
     try {
-      const extension = inferExtension(uri, mimeType);
-      const contentType = mimeType ?? (extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg');
-      const objectPath = `${userId}/avatar-${Date.now()}.${extension}`;
-
-      const response = await fetch(uri);
-      const blob = await response.blob();
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(objectPath, blob, {
-          contentType,
-          upsert: true,
-        });
-
-      if (uploadError) {
-        throw new Error(uploadError.message);
-      }
-
-      const { data } = supabase.storage.from('avatars').getPublicUrl(objectPath);
-      const avatarUrl = data.publicUrl;
-
-      await saveAvatarUrl(avatarUrl, '头像已更新');
+      const avatarUrl = await uploadProfileAvatar({ userId, uri, mimeType, base64Data });
+      onUploaded(avatarUrl);
+      bumpProfileVersion();
+      onClose();
+      Alert.alert('成功', '头像已更新');
     } catch (error) {
       const message = error instanceof Error ? error.message : '上传失败，请稍后重试';
       if (message.includes('Bucket not found')) {
@@ -133,13 +101,14 @@ export function AvatarPickerModal({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
+      base64: true,
       quality: 0.85,
     });
 
     if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
-    await uploadAvatar(asset.uri, asset.mimeType);
+    await uploadAvatar(asset.uri, asset.mimeType, asset.base64 ?? null);
   }
 
   async function takePhoto() {
@@ -152,13 +121,14 @@ export function AvatarPickerModal({
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [1, 1],
+      base64: true,
       quality: 0.85,
     });
 
     if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
-    await uploadAvatar(asset.uri, asset.mimeType);
+    await uploadAvatar(asset.uri, asset.mimeType, asset.base64 ?? null);
   }
 
   return (
