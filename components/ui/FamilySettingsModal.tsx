@@ -5,18 +5,18 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Switch,
   Platform,
   ActivityIndicator,
   Alert,
   Image,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
 import { useEffect, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { ensureProfileForUser } from '@/lib/profile';
+import { inferImageExtension, uploadImageFromUri } from '@/lib/uploadImage';
 import { useAuthStore } from '@/stores/authStore';
 
 const CURRENCIES = [
@@ -27,14 +27,6 @@ const CURRENCIES = [
 ];
 
 const FAMILY_AVATARS = ['🏠', '👨‍👩‍👧', '👨‍👩‍👧‍👦', '👪', '🪙', '💰', '🌟', '🍀', '🐷', '🏡', '💎', '📈'];
-
-function inferExtension(uri: string, mimeType?: string | null) {
-  if (mimeType === 'image/png') return 'png';
-  if (mimeType === 'image/webp') return 'webp';
-  if (uri.toLowerCase().endsWith('.png')) return 'png';
-  if (uri.toLowerCase().endsWith('.webp')) return 'webp';
-  return 'jpg';
-}
 
 export interface FamilyDetail {
   id: number;
@@ -97,7 +89,7 @@ export function FamilySettingsModal({
   const selectedCurrencyLabel =
     CURRENCIES.find((c) => c.value === currency)?.label ?? currency;
 
-  async function uploadFamilyAvatar(uri: string, mimeType?: string | null) {
+  async function uploadFamilyAvatar(uri: string, mimeType?: string | null, base64Data?: string | null) {
     if (!user) {
       Alert.alert('提示', '请先登录后再上传头像');
       return;
@@ -105,27 +97,17 @@ export function FamilySettingsModal({
 
     setAvatarUploading(true);
     try {
-      const extension = inferExtension(uri, mimeType);
-      const contentType = mimeType ?? (extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg');
+      const extension = inferImageExtension(uri, mimeType);
       // storage RLS requires first folder segment to equal auth.uid()
       const objectPath = `${user.id}/family-avatar-${Date.now()}.${extension}`;
-
-      const response = await fetch(uri);
-      const blob = await response.blob();
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(objectPath, blob, {
-          contentType,
-          upsert: true,
-        });
-
-      if (uploadError) {
-        throw new Error(uploadError.message);
-      }
-
-      const { data } = supabase.storage.from('avatars').getPublicUrl(objectPath);
-      setFamilyAvatar(data.publicUrl);
+      const avatarUrl = await uploadImageFromUri({
+        bucket: 'avatars',
+        objectPath,
+        uri,
+        mimeType,
+        base64Data,
+      });
+      setFamilyAvatar(avatarUrl);
       setShowAvatarPicker(false);
       Alert.alert('成功', '已选择本地头像，点击保存后生效');
     } catch (error) {
@@ -151,6 +133,7 @@ export function FamilySettingsModal({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
+      base64: true,
       quality: 0.85,
     });
 
@@ -162,7 +145,7 @@ export function FamilySettingsModal({
       return;
     }
 
-    await uploadFamilyAvatar(asset.uri, asset.mimeType ?? null);
+    await uploadFamilyAvatar(asset.uri, asset.mimeType ?? null, asset.base64 ?? null);
   }
 
   function pickPresetFamilyAvatar(emoji: string) {
@@ -207,7 +190,7 @@ export function FamilySettingsModal({
       let savedFamily: FamilyDetail | undefined;
       if (mode === 'create') {
         await ensureProfileForUser(user);
-        const { data, error: insertError } = await supabase
+        const { error: insertError } = await supabase
           .from('families')
           .insert({
             family_name: familyName.trim(),
@@ -217,24 +200,20 @@ export function FamilySettingsModal({
             debt_warning_threshold: debtThreshold,
             repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
             data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
-          })
-          .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
-          .single();
+          });
 
         error = insertError;
-        if (data) {
-          savedFamily = {
-            id: data.id,
-            family_name: data.family_name,
-            family_avatar: data.family_avatar,
-            currency: data.currency,
-            debt_warning_threshold: Number(data.debt_warning_threshold),
-            repayment_reminder_switch: data.repayment_reminder_switch,
-            data_export_switch: data.data_export_switch,
-          };
+        if (!error) {
+          savedFamily = (await loadOwnCreatedFamily()) ?? undefined;
         }
       } else {
-        const { data, error: updateError } = await supabase
+        const ownCreatedFamily = await loadOwnCreatedFamily();
+        if (!ownCreatedFamily || ownCreatedFamily.id !== initialData!.id) {
+          Alert.alert('保存失败', '只有家庭创建者可以修改家庭设置');
+          return;
+        }
+
+        const { error: updateError } = await supabase
           .from('families')
           .update({
             family_name: familyName.trim(),
@@ -244,20 +223,18 @@ export function FamilySettingsModal({
             repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
             data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
           })
-          .eq('id', initialData!.id)
-          .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
-          .single();
+          .eq('id', initialData!.id);
 
         error = updateError;
-        if (data) {
-          savedFamily = {
-            id: data.id,
-            family_name: data.family_name,
-            family_avatar: data.family_avatar,
-            currency: data.currency,
-            debt_warning_threshold: Number(data.debt_warning_threshold),
-            repayment_reminder_switch: data.repayment_reminder_switch,
-            data_export_switch: data.data_export_switch,
+        if (!error) {
+          savedFamily = (await loadOwnCreatedFamily()) ?? {
+            ...initialData!,
+            family_name: familyName.trim(),
+            family_avatar: familyAvatar,
+            currency,
+            debt_warning_threshold: debtThreshold,
+            repayment_reminder_switch: (repaymentReminder ? 1 : 0) as 0 | 1,
+            data_export_switch: (dataExport ? 1 : 0) as 0 | 1,
           };
         }
       }
@@ -389,69 +366,9 @@ export function FamilySettingsModal({
                 </TouchableOpacity>
               </View>
 
-              {/* ── Debt threshold card ── */}
-              <View
-                className="rounded-2xl px-4 pt-3.5 pb-2 mt-3"
-                style={{ backgroundColor: 'rgba(255,255,255,0.82)', shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 2 }}
-              >
-                <View className="flex-row items-center justify-between mb-3">
-                  <Text className="text-sm font-medium text-gray-700">负债预警阈值</Text>
-                  <View
-                    className="px-3 py-1 rounded-lg"
-                    style={{ backgroundColor: Colors.primaryMid }}
-                  >
-                    <Text className="text-sm font-semibold" style={{ color: Colors.primary }}>
-                      {debtThreshold}%
-                    </Text>
-                  </View>
-                </View>
-                <Slider
-                  minimumValue={0}
-                  maximumValue={100}
-                  step={1}
-                  value={debtThreshold}
-                  onValueChange={(v) => setDebtThreshold(Math.round(v))}
-                  minimumTrackTintColor={Colors.primary}
-                  maximumTrackTintColor="#DDD6FE"
-                  thumbTintColor={Colors.primary}
-                  style={{ marginHorizontal: -4 }}
-                />
-                <View className="flex-row justify-between mt-0.5 mb-1">
-                  <Text className="text-xs text-purple-300">0%</Text>
-                  <Text className="text-xs text-purple-300">100%</Text>
-                </View>
-              </View>
-
-              {/* ── Toggle card ── */}
-              <View
-                className="rounded-2xl overflow-hidden mt-3"
-                style={{ backgroundColor: 'rgba(255,255,255,0.82)', shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 2 }}
-              >
-                <View className="flex-row items-center px-4 py-3 border-b border-purple-50">
-                  <Text className="flex-1 text-sm font-medium text-gray-700">还款提醒</Text>
-                  <Switch
-                    value={repaymentReminder}
-                    onValueChange={setRepaymentReminder}
-                    trackColor={{ false: '#E5E7EB', true: Colors.primaryLight }}
-                    thumbColor={Platform.OS === 'android' ? (repaymentReminder ? Colors.primary : '#fff') : '#fff'}
-                    ios_backgroundColor="#E5E7EB"
-                  />
-                </View>
-                <View className="flex-row items-center px-4 py-3">
-                  <Text className="flex-1 text-sm font-medium text-gray-700">数据导出</Text>
-                  <Switch
-                    value={dataExport}
-                    onValueChange={setDataExport}
-                    trackColor={{ false: '#E5E7EB', true: Colors.primaryLight }}
-                    thumbColor={Platform.OS === 'android' ? (dataExport ? Colors.primary : '#fff') : '#fff'}
-                    ios_backgroundColor="#E5E7EB"
-                  />
-                </View>
-              </View>
-
-              {/* ── Save button ── */}
-              <TouchableOpacity
-                onPress={handleSave}
+                {/* ── Save button ── */}
+                <TouchableOpacity
+                  onPress={handleSave}
                 disabled={saving}
                 activeOpacity={0.8}
                 className="mt-6 rounded-2xl py-4 items-center"

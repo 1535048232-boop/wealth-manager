@@ -32,13 +32,13 @@
     }
   },
   "submit": {
-    "production": {
-      "ios": {
-        "ascAppId": "6764521743"
-      },
-      "android": {
-        "serviceAccountKeyPath": "./credentials/android/service-account.json",
-        "track": "internal"
+      "production": {
+        "ios": {
+          "ascAppId": "6764475411"
+        },
+        "android": {
+          "serviceAccountKeyPath": "./credentials/android/service-account.json",
+          "track": "internal"
       }
     }
   }

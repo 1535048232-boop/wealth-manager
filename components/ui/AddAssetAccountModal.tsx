@@ -585,7 +585,7 @@ export function AddAssetAccountModal({ visible, onClose, onGoToList }: Props) {
             borderTopLeftRadius: 28,
             borderTopRightRadius: 28,
             paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-            height: '88%',
+            maxHeight: '90%',
           }}
         >
           {/* Drag handle */}

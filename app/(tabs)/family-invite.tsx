@@ -135,7 +135,7 @@ export default function FamilyInviteScreen() {
         .limit(8);
 
       if (error) throw error;
-      setRecentInvites((data ?? []) as InviteRow[]);
+      setRecentInvites((data ?? []) as unknown as InviteRow[]);
     } catch (error) {
       console.error('[FamilyInviteScreen] loadRecentInvites failed:', error);
     }
@@ -172,9 +172,9 @@ export default function FamilyInviteScreen() {
     setSearchResult(null);
 
     try {
-      const { data, error } = await supabase.rpc('search_invitable_account', {
+      const { data, error } = await supabase.rpc('search_invitable_account' as never, {
         p_query: query.trim(),
-      });
+      } as never);
 
       if (error) {
         if (isMissingSearchRpcError(error.message)) {
@@ -185,7 +185,7 @@ export default function FamilyInviteScreen() {
         throw error;
       }
 
-      const first = Array.isArray(data) ? (data[0] as SearchAccountResult | undefined) : undefined;
+      const first = Array.isArray(data) ? (data[0] as unknown as SearchAccountResult | undefined) : undefined;
       setSearchResult(first ?? null);
     } catch (error) {
       console.error('[FamilyInviteScreen] handleSearchAccount failed:', error);

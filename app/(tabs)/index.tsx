@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, PanResponder, TouchableOpacity, useWindowDimensions } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useFocusEffect } from 'expo-router';
+import { TrendGranularitySwitch } from '@/components/common/TrendGranularitySwitch';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Colors } from '@/constants/Colors';
 import { useHomeData, type AssetSegmentData, type HomeTrendPoint } from '@/hooks/useHomeData';
+import type { TrendGranularity } from '@/lib/trendTime';
 
 // ─── Donut chart helpers ────────────────────────────────────────────────────
 
@@ -78,14 +80,97 @@ function normalizeAngle(angle: number) {
   return (angle + 360) % 360;
 }
 
+function getVisibleXAxisLabelIndices(totalCount: number, maxVisibleCount: number, activeIndex?: number) {
+  if (totalCount <= 0) return [];
+
+  const safeMaxVisibleCount = Math.max(2, maxVisibleCount);
+  const visible = new Set<number>();
+  visible.add(0);
+  visible.add(totalCount - 1);
+
+  if (activeIndex !== undefined) {
+    visible.add(clamp(activeIndex, 0, totalCount - 1));
+  }
+
+  if (totalCount <= safeMaxVisibleCount) {
+    for (let index = 0; index < totalCount; index += 1) {
+      visible.add(index);
+    }
+    return Array.from(visible).sort((left, right) => left - right);
+  }
+
+  const gapCount = safeMaxVisibleCount - 1;
+  for (let step = 1; step < gapCount; step += 1) {
+    visible.add(Math.round(((totalCount - 1) * step) / gapCount));
+  }
+
+  return Array.from(visible).sort((left, right) => left - right);
+}
+
+function TrendXAxisLabels({
+  points,
+  width,
+  chartPaddingX,
+  activeIndex,
+  activeColor,
+}: {
+  points: Array<{ label: string }>;
+  width: number;
+  chartPaddingX: number;
+  activeIndex: number;
+  activeColor: string;
+}) {
+  const plotWidth = Math.max(width - chartPaddingX * 2, 0);
+  const labelWidth = points.length > 6 ? 34 : 40;
+  const visibleIndices = getVisibleXAxisLabelIndices(
+    points.length,
+    Math.max(3, Math.floor(plotWidth / 52) + 1),
+    activeIndex,
+  );
+
+  if (points.length === 0) return null;
+
+  return (
+    <View style={{ position: 'relative', marginTop: 8, width, height: 18 }}>
+      {visibleIndices.map((index) => {
+        const point = points[index];
+        const x = points.length === 1
+          ? chartPaddingX
+          : chartPaddingX + (index / (points.length - 1)) * plotWidth;
+        const left = Math.max(0, Math.min(x - labelWidth / 2, width - labelWidth));
+
+        return (
+          <Text
+            key={`${point.label}-${index}`}
+            numberOfLines={1}
+            style={{
+              position: 'absolute',
+              left,
+              width: labelWidth,
+              textAlign: 'center',
+              fontSize: 10,
+              color: index === activeIndex ? activeColor : Colors.text.tertiary,
+              fontWeight: index === activeIndex ? '700' : '400',
+            }}
+          >
+            {point.label}
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
+
 function HomeAssetTrendChart({
   points,
   segments,
   width,
+  headerAccessory,
 }: {
   points: HomeTrendPoint[];
   segments: AssetSegmentData[];
   width: number;
+  headerAccessory?: React.ReactNode;
 }) {
   const chartHeight = 128;
   const valueLabelWidth = 64;
@@ -192,12 +277,21 @@ function HomeAssetTrendChart({
 
   return (
     <View style={{ marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: Colors.border }}>
-      <View className="flex-row items-center justify-between mb-2">
+      <View className="flex-row items-center justify-between">
         <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text.primary }}>家庭资产趋势</Text>
-        <Text style={{ fontSize: 11, color: isInteracting ? Colors.primary : Colors.text.tertiary }}>
-          {isInteracting ? activeLabel : '按住拖动查看'}
-        </Text>
+        {headerAccessory}
       </View>
+      <Text
+        style={{
+          fontSize: 11,
+          color: isInteracting ? Colors.primary : Colors.text.tertiary,
+          textAlign: 'right',
+          marginTop: 6,
+          marginBottom: 8,
+        }}
+      >
+        {isInteracting ? activeLabel : '按住拖动查看'}
+      </Text>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
         {chartSeries.map((item) => {
@@ -330,20 +424,13 @@ function HomeAssetTrendChart({
         />
       </View>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingHorizontal: chartPaddingX }}>
-        {points.map((point) => (
-          <Text
-            key={point.label}
-            style={{
-              fontSize: 11,
-              color: point.label === activeLabel ? Colors.primary : Colors.text.tertiary,
-              fontWeight: point.label === activeLabel ? '700' : '400',
-            }}
-          >
-            {point.label}
-          </Text>
-        ))}
-      </View>
+      <TrendXAxisLabels
+        points={points}
+        width={width}
+        chartPaddingX={chartPaddingX}
+        activeIndex={activeIndex}
+        activeColor={Colors.primary}
+      />
     </View>
   );
 }
@@ -728,20 +815,13 @@ function QuadrantTrendChart({
         <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 }} {...panResponder.panHandlers} />
       </View>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingHorizontal: chartPaddingX }}>
-        {points.map((point) => (
-          <Text
-            key={point.label}
-            style={{
-              fontSize: 11,
-              color: point.label === activeLabel ? color : Colors.text.tertiary,
-              fontWeight: point.label === activeLabel ? '700' : '400',
-            }}
-          >
-            {point.label}
-          </Text>
-        ))}
-      </View>
+      <TrendXAxisLabels
+        points={points}
+        width={width}
+        chartPaddingX={chartPaddingX}
+        activeIndex={activeIndex}
+        activeColor={color}
+      />
     </View>
   );
 }
@@ -753,6 +833,7 @@ export default function HomeScreen() {
   const greeting = getGreeting();
   const dateLabel = getDateLabel();
   const { data, isLoading, error, refetch } = useHomeData();
+  const [selectedTrendGranularity, setSelectedTrendGranularity] = useState<TrendGranularity>('month');
 
   useFocusEffect(
     useCallback(() => {
@@ -763,6 +844,7 @@ export default function HomeScreen() {
   const RIGHT_LEGEND_LIMIT = 5;
   const isNarrowScreen = width < 390;
   const homeTrendChartWidth = Math.max(width - 68, 220);
+  const selectedTrendPoints = data?.trendPoints[selectedTrendGranularity] ?? [];
 
   return (
     <ScreenWrapper className="bg-app-bg">
@@ -917,14 +999,21 @@ export default function HomeScreen() {
                   )}
                 </View>
 
-                <HomeAssetTrendChart points={data.trendPoints} segments={data.segments} width={homeTrendChartWidth} />
                 <ClassificationPieSection segments={data.quadrantSegments} />
+                <HomeAssetTrendChart
+                  points={selectedTrendPoints}
+                  segments={data.segments}
+                  width={homeTrendChartWidth}
+                  headerAccessory={
+                    <TrendGranularitySwitch value={selectedTrendGranularity} onChange={setSelectedTrendGranularity} />
+                  }
+                />
                 <QuadrantTrendChart
-                  points={data.trendPoints}
+                  points={selectedTrendPoints}
                   width={homeTrendChartWidth}
                   quadrant="B类消费"
                   color="#FB923C"
-                  title="B类消费月度增长趋势"
+                  title={selectedTrendGranularity === 'month' ? 'B类消费月度增长趋势' : 'B类消费年度增长趋势'}
                 />
               </View>
             </View>

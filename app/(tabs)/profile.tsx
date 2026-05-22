@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, Platform, Modal, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Platform, Modal, ActivityIndicator, Alert } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
@@ -9,6 +9,7 @@ import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
 import { FamilySettingsModal, FamilyDetail } from '@/components/ui/FamilySettingsModal';
+import { AddAssetAccountModal } from '@/components/ui/AddAssetAccountModal';
 import { AssetAccountListModal } from '@/components/ui/AssetAccountListModal';
 import { ProfileEditModal } from '../../components/ui/ProfileEditModal';
 
@@ -112,6 +113,7 @@ export default function ProfileScreen() {
   const [family, setFamily] = useState<Family | null>(null);
   const [showCreateFamily, setShowCreateFamily] = useState(false);
   const [familyModalMode, setFamilyModalMode] = useState<'create' | 'view'>('create');
+  const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAssetList, setShowAssetList] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [familyMembersLoading, setFamilyMembersLoading] = useState(false);
@@ -124,45 +126,6 @@ export default function ProfileScreen() {
   const [assetPreviewAccounts, setAssetPreviewAccounts] = useState<Array<{ id: number; account_type: AssetAccountType }>>([]);
   const [currentFamilyRole, setCurrentFamilyRole] = useState<'admin' | 'member' | 'guest' | null>(null);
   const [currentMemberId, setCurrentMemberId] = useState<number | null>(null);
-  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
-  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
-  const [deletingAccount, setDeletingAccount] = useState(false);
-
-  async function handleDeleteAccount() {
-    if (!user) return;
-
-    const inputEmail = deleteConfirmEmail.trim().toLowerCase();
-    const accountEmail = (user.email ?? '').toLowerCase();
-    if (!inputEmail || inputEmail !== accountEmail) {
-      Alert.alert('确认失败', '请输入与当前账号一致的邮箱');
-      return;
-    }
-
-    try {
-      setDeletingAccount(true);
-      const { data, error } = await supabase.functions.invoke<{ deleted: true }>('delete-account', {
-        body: { confirmEmail: deleteConfirmEmail.trim() },
-      });
-
-      // Edge Function 返回业务级 error 时，data 为 { data: null, error: {...} } 结构
-      const fnError = (data as unknown as { error?: { message?: string } } | null)?.error;
-      if (error || fnError) {
-        const msg = fnError?.message ?? error?.message ?? '删除失败，请稍后重试';
-        Alert.alert('删除失败', msg);
-        return;
-      }
-
-      // 删除成功 → 清理本地会话
-      setShowDeleteAccount(false);
-      setDeleteConfirmEmail('');
-      await signOut();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '删除失败，请稍后重试';
-      Alert.alert('删除失败', msg);
-    } finally {
-      setDeletingAccount(false);
-    }
-  }
 
   function logFamilyMembersDebug(stage: string, payload?: unknown) {
     if (!__DEV__) return;
@@ -186,31 +149,6 @@ export default function ProfileScreen() {
       if (memberError) throw memberError;
 
       if (!memberData?.family_id) {
-        const { data: creatorFamily, error: creatorFamilyError } = await supabase
-          .from('families')
-          .select('id, family_name, family_avatar, currency, debt_warning_threshold, repayment_reminder_switch, data_export_switch')
-          .eq('creator_id', user.id)
-          .maybeSingle();
-
-        if (creatorFamilyError) throw creatorFamilyError;
-
-        if (creatorFamily) {
-          setFamily({
-            id: creatorFamily.id,
-            family_name: creatorFamily.family_name,
-            family_avatar: creatorFamily.family_avatar,
-            currency: creatorFamily.currency,
-            debt_warning_threshold: Number(creatorFamily.debt_warning_threshold),
-            repayment_reminder_switch: creatorFamily.repayment_reminder_switch,
-            data_export_switch: creatorFamily.data_export_switch,
-          });
-          setCurrentFamilyRole('admin');
-          setCurrentMemberId(null);
-          setFamilyMembers([]);
-          setFamilyInvitations([]);
-          return;
-        }
-
         logFamilyMembersDebug('stop no family_id', { memberData });
         setFamily(null);
         setCurrentFamilyRole(null);
@@ -478,8 +416,9 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
         {/* ── Header ── */}
-        <View className="px-5 pt-4 pb-2">
+        <View className="flex-row items-center justify-between px-5 pt-4 pb-2">
           <Text className="text-[22px] font-bold text-gray-900">设置</Text>
+          <Avatar uri={profile?.avatar_url} name={hasAvatar ? displayName : undefined} showCamera={!hasAvatar} size="md" />
         </View>
 
         {/* ── User card ── */}
@@ -558,6 +497,10 @@ export default function ProfileScreen() {
             onPress={() => setShowFamilyMembers(true)}
           />
           <SettingRow
+            label="添加资产账户"
+            onPress={() => setShowAddAsset(true)}
+          />
+          <SettingRow
             label="我的资产账户"
             value={
               assetAccountCount > 0 ? (
@@ -606,34 +549,20 @@ export default function ProfileScreen() {
           <Text className="text-sm font-semibold text-red-500">退出登录</Text>
         </TouchableOpacity>
 
-        {/* ── 删除账号（App Store Guideline 5.1.1(v) 合规要求）── */}
-        <TouchableOpacity
-          accessibilityLabel="删除账号"
-          onPress={() => {
-            setDeleteConfirmEmail('');
-            setShowDeleteAccount(true);
-          }}
-          className="mx-4 mt-3 py-3 rounded-2xl items-center"
-          style={{
-            backgroundColor: 'transparent',
-            borderWidth: 1,
-            borderColor: '#E5E7EB',
-          }}
-        >
-          <Text className="text-sm font-medium" style={{ color: '#9F7A82' }}>删除账号</Text>
-        </TouchableOpacity>
-
       </ScrollView>
       <FamilySettingsModal
         visible={showCreateFamily}
         onClose={() => setShowCreateFamily(false)}
-        onSuccess={(nextFamily) => {
-          setShowCreateFamily(false);
-          if (nextFamily) setFamily(nextFamily);
-          loadFamily();
-        }}
+        onSuccess={() => { setShowCreateFamily(false); loadFamily(); }}
         mode={familyModalMode}
         initialData={family ?? undefined}
+      />
+      <AddAssetAccountModal
+        visible={showAddAsset}
+        onClose={() => {
+          setShowAddAsset(false);
+          loadAssetAccountsPreview();
+        }}
       />
       <AssetAccountListModal
         visible={showAssetList}
@@ -654,72 +583,6 @@ export default function ProfileScreen() {
           setShowEditProfile(false);
         }}
       />
-
-      {/* ── 删除账号确认弹窗 ── */}
-      <Modal
-        visible={showDeleteAccount}
-        animationType="fade"
-        transparent
-        onRequestClose={() => !deletingAccount && setShowDeleteAccount(false)}
-      >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 24 }}>
-          <View className="bg-white rounded-3xl px-6 py-6">
-            <View className="items-center mb-3">
-              <View className="w-12 h-12 rounded-full items-center justify-center" style={{ backgroundColor: '#FEE2E2' }}>
-                <MaterialCommunityIcons name="alert-octagon" size={24} color="#DC2626" />
-              </View>
-            </View>
-            <Text className="text-lg font-bold text-gray-900 text-center">删除账号</Text>
-            <Text className="text-sm text-gray-600 text-center mt-2 leading-5">
-              此操作不可恢复。删除后将永久清除你的个人资料、家庭、资产账户、邀请记录等所有数据。
-            </Text>
-            <Text className="text-xs text-gray-400 text-center mt-2">
-              如需继续，请输入账号邮箱以确认：
-            </Text>
-            <Text className="text-sm font-semibold text-gray-800 text-center mt-1">
-              {user?.email ?? ''}
-            </Text>
-
-            <TextInput
-              value={deleteConfirmEmail}
-              onChangeText={setDeleteConfirmEmail}
-              placeholder="请输入邮箱确认"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              editable={!deletingAccount}
-              accessibilityLabel="确认账号邮箱"
-              className="mt-4 px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900"
-              placeholderTextColor="#9CA3AF"
-            />
-
-            <View className="flex-row mt-5" style={{ gap: 10 }}>
-              <TouchableOpacity
-                disabled={deletingAccount}
-                onPress={() => {
-                  setShowDeleteAccount(false);
-                  setDeleteConfirmEmail('');
-                }}
-                className="flex-1 py-3 rounded-xl bg-gray-100 items-center"
-              >
-                <Text className="text-sm font-semibold text-gray-700">取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={deletingAccount}
-                onPress={handleDeleteAccount}
-                className="flex-1 py-3 rounded-xl items-center"
-                style={{ backgroundColor: deletingAccount ? '#FCA5A5' : '#DC2626' }}
-              >
-                {deletingAccount ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text className="text-sm font-semibold text-white">永久删除</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       <Modal
         visible={showFamilyMembers}

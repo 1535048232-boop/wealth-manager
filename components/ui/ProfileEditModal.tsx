@@ -10,11 +10,12 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEffect, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/stores/appStore';
 import { Avatar } from '@/components/ui/Avatar';
-import { AvatarPickerModal } from '@/components/ui/AvatarPickerModal';
+import { uploadProfileAvatar } from '@/lib/profileAvatar';
 
 interface ProfilePayload {
   display_name: string | null;
@@ -44,7 +45,7 @@ export function ProfileEditModal({
   const [displayName, setDisplayName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -91,6 +92,57 @@ export function ProfileEditModal({
     }
   }
 
+  async function handlePickAvatar() {
+    if (!userId) {
+      Alert.alert('提示', '用户信息缺失，请重新登录后重试');
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('权限不足', '请先允许访问相册');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      base64: true,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.length) return;
+
+    const asset = result.assets[0];
+    if (!asset.uri) {
+      Alert.alert('上传失败', '未获取到图片文件');
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      const nextAvatarUrl = await uploadProfileAvatar({
+        userId,
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+        base64Data: asset.base64 ?? null,
+      });
+      setAvatarUrl(nextAvatarUrl);
+      bumpProfileVersion();
+      Alert.alert('成功', '头像已更新');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '上传失败，请稍后重试';
+      if (message.includes('Bucket not found')) {
+        Alert.alert('上传失败', '未找到 avatars 存储桶。请先执行数据库迁移：npx supabase db push');
+      } else {
+        Alert.alert('上传失败', message);
+      }
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
   return (
     <Modal
       visible={visible}
@@ -127,7 +179,8 @@ export function ProfileEditModal({
             <View className="items-center">
               <TouchableOpacity
                 activeOpacity={0.8}
-                onPress={() => setShowAvatarPicker(true)}
+                onPress={handlePickAvatar}
+                disabled={saving || avatarUploading}
                 style={{
                   width: 124,
                   height: 124,
@@ -137,6 +190,7 @@ export function ProfileEditModal({
                   backgroundColor: 'rgba(202,192,240,0.36)',
                   borderWidth: 1,
                   borderColor: 'rgba(170,155,232,0.45)',
+                  opacity: saving || avatarUploading ? 0.7 : 1,
                 }}
               >
                 <Avatar
@@ -147,8 +201,17 @@ export function ProfileEditModal({
                 />
               </TouchableOpacity>
               <View className="flex-row items-center mt-2">
-                <MaterialCommunityIcons name="camera-outline" size={14} color="#6E63A8" />
-                <Text className="text-base ml-1" style={{ color: '#6E63A8' }}>上传头像</Text>
+                {avatarUploading ? (
+                  <>
+                    <ActivityIndicator size="small" color="#6E63A8" />
+                    <Text className="text-base ml-1" style={{ color: '#6E63A8' }}>正在上传...</Text>
+                  </>
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="camera-outline" size={14} color="#6E63A8" />
+                    <Text className="text-base ml-1" style={{ color: '#6E63A8' }}>上传头像</Text>
+                  </>
+                )}
               </View>
             </View>
 
@@ -218,17 +281,6 @@ export function ProfileEditModal({
         </TouchableOpacity>
       </TouchableOpacity>
 
-      <AvatarPickerModal
-        visible={showAvatarPicker}
-        userId={userId}
-        displayName={displayName}
-        currentAvatarUrl={avatarUrl}
-        onClose={() => setShowAvatarPicker(false)}
-        onUploaded={(nextAvatarUrl) => {
-          setAvatarUrl(nextAvatarUrl);
-          setShowAvatarPicker(false);
-        }}
-      />
     </Modal>
   );
 }

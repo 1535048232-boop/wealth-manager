@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { ScreenWrapper } from '@/components/common/ScreenWrapper';
 import { Avatar } from '@/components/ui/Avatar';
@@ -31,21 +33,10 @@ interface TrendPoint {
   totalsByMember: Record<number, number>;
 }
 
-type AssetTrendType = '总趋势' | '银行卡' | '股票' | '期权' | '公积金';
-
-interface TrendChartSection {
-  key: AssetTrendType;
-  label: string;
-  emptyText: string;
-  accentColor: string;
-  accentBg: string;
-  trendPoints: TrendPoint[];
-}
-
 interface FamilyMembersAnalyticsData {
   totalAssets: number;
   memberCards: FamilyMemberCardData[];
-  trendChartSections: TrendChartSection[];
+  trendPoints: TrendPoint[];
 }
 
 interface FamilyMemberRow {
@@ -72,43 +63,6 @@ interface SnapshotRow {
 }
 
 const MEMBER_LINE_COLORS = ['#8B5CF6', '#FB7185', '#0EA5E9', '#F59E0B', '#14B8A6'];
-const TREND_CHART_CONFIG: Array<Omit<TrendChartSection, 'trendPoints'>> = [
-  {
-    key: '总趋势',
-    label: '总趋势',
-    emptyText: '暂无趋势数据',
-    accentColor: Colors.primary,
-    accentBg: Colors.primaryBg,
-  },
-  {
-    key: '银行卡',
-    label: '银行卡',
-    emptyText: '暂无银行卡趋势数据',
-    accentColor: '#4F46E5',
-    accentBg: '#E0E7FF',
-  },
-  {
-    key: '股票',
-    label: '股票',
-    emptyText: '暂无股票趋势数据',
-    accentColor: '#EA580C',
-    accentBg: '#FFEDD5',
-  },
-  {
-    key: '期权',
-    label: '期权',
-    emptyText: '暂无期权趋势数据',
-    accentColor: '#D97706',
-    accentBg: '#FEF3C7',
-  },
-  {
-    key: '公积金',
-    label: '公积金',
-    emptyText: '暂无公积金趋势数据',
-    accentColor: '#059669',
-    accentBg: '#D1FAE5',
-  },
-];
 
 const ACCOUNT_TYPE_META: Record<string, { color: string; bg: string; icon: string }> = {
   '银行卡': { color: '#4F46E5', bg: '#E0E7FF', icon: 'bank' },
@@ -171,235 +125,76 @@ function getValueAtDate(snapshots: SnapshotRow[], dateText: string) {
   return lastAmount;
 }
 
-function getMemberSeriesPoints(
-  data: { memberCards: FamilyMemberCardData[]; trendPoints: TrendPoint[] },
-  memberId: number,
-  width: number,
-  height: number,
-  maxValue: number,
-  horizontalPadding = 0,
-  topPadding = 0,
-  bottomPadding = 0,
-) {
+function getMemberSeriesPoints(data: FamilyMembersAnalyticsData, memberId: number, width: number, height: number, maxValue: number) {
   if (data.trendPoints.length === 0 || maxValue <= 0) return [] as Array<{ x: number; y: number }>;
 
-  const drawableWidth = Math.max(width - horizontalPadding * 2, 1);
-  const drawableHeight = Math.max(height - topPadding - bottomPadding, 1);
-  const xStep = data.trendPoints.length === 1 ? 0 : drawableWidth / (data.trendPoints.length - 1);
+  const xStep = data.trendPoints.length === 1 ? 0 : width / (data.trendPoints.length - 1);
 
   return data.trendPoints.map((point, index) => {
     const value = point.totalsByMember[memberId] ?? 0;
     return {
-      x: horizontalPadding + index * xStep,
-      y: topPadding + drawableHeight - (value / maxValue) * drawableHeight,
+      x: index * xStep,
+      y: height - (value / maxValue) * height,
     };
   });
 }
 
-function TrendChart({
-  data,
-  title = '月度增长趋势',
-}: {
-  data: Pick<FamilyMembersAnalyticsData, 'memberCards' | 'trendChartSections'>;
-  title?: string;
-}) {
-  const [selectedSectionKey, setSelectedSectionKey] = useState<AssetTrendType>('总趋势');
-  const selectedSection = data.trendChartSections.find((section) => section.key === selectedSectionKey) ?? data.trendChartSections[0];
-  const currentData = useMemo(
-    () => ({
-      memberCards: data.memberCards,
-      trendPoints: selectedSection?.trendPoints ?? [],
-    }),
-    [data.memberCards, selectedSection],
-  );
-  const chartHeight = 180;
-  const valueLabelWidth = 72;
+function TrendChart({ data }: { data: FamilyMembersAnalyticsData }) {
+  const chartWidth = 300;
+  const chartHeight = 160;
+  const chartInnerHeight = chartHeight - 18;
   const axisLabels = [0, 0.25, 0.5, 0.75, 1];
-  const [selectedIndex, setSelectedIndex] = useState(Math.max(currentData.trendPoints.length - 1, 0));
-  const [selectedMemberId, setSelectedMemberId] = useState(data.memberCards[0]?.memberId ?? 0);
-  const [chartWidth, setChartWidth] = useState(300);
-  const chartHorizontalPadding = 24;
-  const chartTopPadding = 26;
-  const chartBottomPadding = 24;
-  const drawableChartWidth = Math.max(chartWidth - chartHorizontalPadding * 2, 1);
-  const drawableChartHeight = Math.max(chartHeight - chartTopPadding - chartBottomPadding, 1);
+  const [selectedIndex, setSelectedIndex] = useState(Math.max(data.trendPoints.length - 1, 0));
   const maxValue = Math.max(
-    ...currentData.trendPoints.flatMap((point) => Object.values(point.totalsByMember)),
+    ...data.trendPoints.flatMap((point) => Object.values(point.totalsByMember)),
     0,
   );
 
   useEffect(() => {
-    setSelectedIndex(Math.max(currentData.trendPoints.length - 1, 0));
-  }, [currentData.trendPoints.length, selectedSectionKey]);
+    setSelectedIndex(Math.max(data.trendPoints.length - 1, 0));
+  }, [data.trendPoints.length]);
 
-  useEffect(() => {
-    if (!data.memberCards.some((member) => member.memberId === selectedMemberId)) {
-      setSelectedMemberId(data.memberCards[0]?.memberId ?? 0);
-    }
-  }, [data.memberCards, selectedMemberId]);
+  const selectedPoint = data.trendPoints[selectedIndex] ?? data.trendPoints[data.trendPoints.length - 1];
+  const selectedLineX = data.trendPoints.length > 1
+    ? (selectedIndex / (data.trendPoints.length - 1)) * chartWidth
+    : 0;
+  const tooltipWidth = 150;
+  const tooltipLeft = Math.max(0, Math.min(selectedLineX - tooltipWidth / 2, chartWidth - tooltipWidth));
 
-  const selectedPoint = currentData.trendPoints[selectedIndex] ?? currentData.trendPoints[currentData.trendPoints.length - 1];
-  const selectedMember = data.memberCards.find((member) => member.memberId === selectedMemberId) ?? data.memberCards[0];
-  const selectedLineX = currentData.trendPoints.length > 1
-    ? chartHorizontalPadding + (selectedIndex / (currentData.trendPoints.length - 1)) * drawableChartWidth
-    : chartHorizontalPadding;
-  const selectedMemberPoints = selectedMember
-    ? getMemberSeriesPoints(
-      currentData,
-      selectedMember.memberId,
-      chartWidth,
-      chartHeight,
-      maxValue,
-      chartHorizontalPadding,
-      chartTopPadding,
-      chartBottomPadding,
-    )
-    : [];
-  const activeSelectedPoint = selectedMemberPoints[selectedIndex];
-  const selectedMemberValue = selectedPoint && selectedMember ? selectedPoint.totalsByMember[selectedMember.memberId] ?? 0 : 0;
-  const labelLeft = activeSelectedPoint
-    ? Math.max(8, Math.min(activeSelectedPoint.x - valueLabelWidth / 2, chartWidth - valueLabelWidth - 8))
-    : 8;
-  const labelTop = activeSelectedPoint ? Math.max(0, activeSelectedPoint.y - 24) : 0;
-
-  const updateSelectedIndex = useCallback((locationX: number) => {
-    if (currentData.trendPoints.length === 0) return;
-    const x = Math.max(chartHorizontalPadding, Math.min(locationX, chartWidth - chartHorizontalPadding));
-    const rawIndex = currentData.trendPoints.length === 1
+  function updateSelectedIndex(locationX: number) {
+    if (data.trendPoints.length === 0) return;
+    const x = Math.max(0, Math.min(locationX, chartWidth));
+    const rawIndex = data.trendPoints.length === 1
       ? 0
-      : Math.round(((x - chartHorizontalPadding) / drawableChartWidth) * (currentData.trendPoints.length - 1));
+      : Math.round((x / chartWidth) * (data.trendPoints.length - 1));
 
-    setSelectedIndex(Math.max(0, Math.min(rawIndex, currentData.trendPoints.length - 1)));
-  }, [chartHorizontalPadding, currentData.trendPoints.length, drawableChartWidth, chartWidth]);
+    setSelectedIndex(Math.max(0, Math.min(rawIndex, data.trendPoints.length - 1)));
+  }
 
-  const chartPanResponder = useMemo(
-    () => PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderGrant: (event) => updateSelectedIndex(event.nativeEvent.locationX),
-      onPanResponderMove: (event) => updateSelectedIndex(event.nativeEvent.locationX),
-    }),
-    [updateSelectedIndex],
-  );
-
-  const renderSectionTabs = () => (
-    <View className="flex-row flex-wrap mt-4 mb-1">
-      {data.trendChartSections.map((section) => {
-        const selected = section.key === selectedSectionKey;
-        return (
-          <TouchableOpacity
-            key={section.key}
-            activeOpacity={0.85}
-            onPress={() => setSelectedSectionKey(section.key)}
-            style={{
-              borderRadius: 999,
-              paddingHorizontal: 12,
-              paddingVertical: 7,
-              marginRight: 8,
-              marginBottom: 8,
-              backgroundColor: selected ? section.accentBg : '#FFFFFF',
-              borderWidth: 1,
-              borderColor: selected ? section.accentColor : Colors.border,
-            }}
-          >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: selected ? section.accentColor : Colors.text.secondary }}>
-              {section.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-
-  if (currentData.trendPoints.length === 0 || maxValue <= 0) {
+  if (data.trendPoints.length === 0 || maxValue <= 0) {
     return (
       <View className="rounded-3xl px-5 py-6" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>{title}</Text>
-          {selectedSection ? (
-            <View
-              style={{
-                borderRadius: 999,
-                paddingHorizontal: 10,
-                paddingVertical: 5,
-                backgroundColor: selectedSection.accentBg,
-              }}
-            >
-              <Text style={{ fontSize: 11, fontWeight: '700', color: selectedSection.accentColor }}>{selectedSection.label}</Text>
-            </View>
-          ) : null}
-        </View>
-        {renderSectionTabs()}
-        <Text style={{ fontSize: 13, color: Colors.text.secondary, marginTop: 10 }}>
-          {selectedSection?.emptyText ?? '暂无趋势数据'}
-        </Text>
+        <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
+        <Text style={{ fontSize: 13, color: Colors.text.secondary, marginTop: 10 }}>暂无趋势数据</Text>
       </View>
     );
   }
 
   return (
-    <View className="rounded-3xl px-5 py-5" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, overflow: 'visible' }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>{title}</Text>
-        {selectedSection ? (
-          <View
-            style={{
-              borderRadius: 999,
-              paddingHorizontal: 10,
-              paddingVertical: 5,
-              backgroundColor: selectedSection.accentBg,
-            }}
-          >
-            <Text style={{ fontSize: 11, fontWeight: '700', color: selectedSection.accentColor }}>{selectedSection.label}</Text>
-          </View>
-        ) : null}
-      </View>
-
-      {renderSectionTabs()}
+    <View className="rounded-3xl px-5 py-5" style={{ backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border }}>
+      <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.text.primary }}>月度增长趋势</Text>
 
       <View className="flex-row items-center flex-wrap mt-3 mb-3">
-        {data.memberCards.map((member) => {
-          const selected = member.memberId === selectedMember?.memberId;
-          const selectedValue = selectedPoint?.totalsByMember[member.memberId] ?? 0;
-          return (
-            <TouchableOpacity
-              key={member.memberId}
-              activeOpacity={0.82}
-              onPress={() => setSelectedMemberId(member.memberId)}
-              className="flex-row items-center mr-2 mb-2"
-              style={{
-                borderRadius: 999,
-                paddingHorizontal: 7,
-                paddingVertical: 3,
-                backgroundColor: selected ? `${member.lineColor}14` : '#FFFFFF',
-                borderWidth: 1,
-                borderColor: selected ? member.lineColor : Colors.border,
-              }}
-            >
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: member.lineColor, marginRight: 4 }} />
-              <Text numberOfLines={1} style={{ fontSize: 10, color: selected ? Colors.text.primary : Colors.text.secondary, maxWidth: 64 }}>
-                {member.displayName}
-              </Text>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: selected ? member.lineColor : Colors.text.primary, marginLeft: 3 }}>
-                ¥{formatAmount(selectedValue)}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        {data.memberCards.map((member) => (
+          <View key={member.memberId} className="flex-row items-center mr-3 mb-1">
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: member.lineColor, marginRight: 6 }} />
+            <Text style={{ fontSize: 12, color: Colors.text.secondary }}>{member.displayName}</Text>
+          </View>
+        ))}
       </View>
 
       <View style={{ flexDirection: 'row' }}>
-        <View
-          style={{
-            width: 40,
-            height: chartHeight,
-            justifyContent: 'space-between',
-            paddingTop: chartTopPadding - 4,
-            paddingBottom: chartBottomPadding - 2,
-          }}
-        >
+        <View style={{ width: 40, height: chartHeight, justifyContent: 'space-between', paddingBottom: 18 }}>
           {[...axisLabels].reverse().map((ratio) => (
             <Text key={ratio} style={{ fontSize: 11, color: Colors.text.tertiary }}>
               {formatAmount(Math.round(maxValue * ratio))}
@@ -407,86 +202,75 @@ function TrendChart({
           ))}
         </View>
 
-        <View
-          style={{ flex: 1, minWidth: 0, overflow: 'visible' }}
-          onLayout={(event) => {
-            const nextWidth = Math.max(180, Math.floor(event.nativeEvent.layout.width));
-            setChartWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current));
-          }}
-        >
+        <View>
           <View
-            style={{ width: '100%', height: chartHeight, position: 'relative', overflow: 'visible' }}
-            {...chartPanResponder.panHandlers}
+            style={{ width: chartWidth, height: chartHeight, position: 'relative' }}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={(event) => updateSelectedIndex(event.nativeEvent.locationX)}
+            onResponderMove={(event) => updateSelectedIndex(event.nativeEvent.locationX)}
           >
-            {activeSelectedPoint && selectedMember ? (
+            {selectedPoint ? (
               <View
                 pointerEvents="none"
-                className="rounded-full px-2 py-0.5"
+                className="rounded-2xl px-3 py-2"
                 style={{
                   position: 'absolute',
-                  left: labelLeft,
-                  top: labelTop,
-                  width: valueLabelWidth,
-                  backgroundColor: selectedMember.lineColor,
+                  left: tooltipLeft,
+                  top: 8,
+                  width: tooltipWidth,
+                  backgroundColor: 'rgba(255,255,255,0.96)',
                   borderWidth: 1,
-                  borderColor: selectedMember.lineColor,
-                  alignItems: 'center',
+                  borderColor: Colors.border,
+                  shadowColor: Colors.shadow,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 1,
+                  shadowRadius: 6,
+                  elevation: 2,
                   zIndex: 2,
                 }}
               >
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.75}
-                  style={{
-                    fontSize: 9,
-                    fontWeight: '700',
-                    color: '#FFFFFF',
-                  }}
-                >
-                  ¥{formatAmount(selectedMemberValue)}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.primary, marginBottom: 4 }}>
+                  {selectedPoint.label}
                 </Text>
+                {data.memberCards.map((member) => {
+                  const selectedValue = selectedPoint.totalsByMember[member.memberId] ?? 0;
+                  return (
+                    <View key={member.memberId} className="flex-row items-center justify-between mb-1 last:mb-0">
+                      <View className="flex-row items-center flex-1 mr-2">
+                        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: member.lineColor, marginRight: 6 }} />
+                        <Text numberOfLines={1} style={{ fontSize: 11, color: Colors.text.secondary, flex: 1 }}>
+                          {member.displayName}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: Colors.text.primary }}>
+                        ¥{formatAmount(selectedValue)}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
             ) : null}
 
             <Svg width={chartWidth} height={chartHeight}>
               {axisLabels.map((ratio) => {
-                const y = chartTopPadding + drawableChartHeight - ratio * drawableChartHeight;
-                return (
-                  <Line
-                    key={ratio}
-                    x1={chartHorizontalPadding}
-                    y1={y}
-                    x2={chartWidth - chartHorizontalPadding}
-                    y2={y}
-                    stroke="#E5E7EB"
-                    strokeDasharray="4 4"
-                  />
-                );
+                const y = chartHeight - ratio * chartHeight;
+                return <Line key={ratio} x1="0" y1={y} x2={chartWidth} y2={y} stroke="#E5E7EB" strokeDasharray="4 4" />;
               })}
 
-              {selectedPoint && currentData.trendPoints.length > 1 ? (
+              {selectedPoint && data.trendPoints.length > 1 ? (
                 <Line
-                  x1={selectedLineX}
-                  y1={chartTopPadding}
-                  x2={selectedLineX}
-                  y2={chartTopPadding + drawableChartHeight}
+                  x1={(selectedIndex / (data.trendPoints.length - 1)) * chartWidth}
+                  y1={0}
+                  x2={(selectedIndex / (data.trendPoints.length - 1)) * chartWidth}
+                  y2={chartHeight}
                   stroke="#D8B4FE"
                   strokeDasharray="4 4"
                 />
               ) : null}
 
               {data.memberCards.map((member) => {
-                const points = getMemberSeriesPoints(
-                  currentData,
-                  member.memberId,
-                  chartWidth,
-                  chartHeight,
-                  maxValue,
-                  chartHorizontalPadding,
-                  chartTopPadding,
-                  chartBottomPadding,
-                );
+                const points = getMemberSeriesPoints(data, member.memberId, chartWidth, chartInnerHeight, maxValue);
                 const path = buildLinePath(points);
                 const lastPoint = points[points.length - 1];
                 const selectedChartPoint = points[selectedIndex];
@@ -507,17 +291,11 @@ function TrendChart({
             </Svg>
           </View>
 
-          <View style={{ position: 'relative', marginTop: 8, width: '100%', height: 18 }}>
-            {currentData.trendPoints.map((point, index) => (
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, width: chartWidth }}>
+            {data.trendPoints.map((point, index) => (
               <Text
                 key={point.label}
                 style={{
-                  position: 'absolute',
-                  left: currentData.trendPoints.length === 1
-                    ? chartHorizontalPadding - 12
-                    : chartHorizontalPadding + (index / (currentData.trendPoints.length - 1)) * drawableChartWidth - 12,
-                  width: 24,
-                  textAlign: 'center',
                   fontSize: 11,
                   color: index === selectedIndex ? Colors.primary : Colors.text.tertiary,
                   fontWeight: index === selectedIndex ? '700' : '400',
@@ -555,7 +333,6 @@ function MemberBreakdownChip({ item }: { item: MemberTypeBreakdown }) {
 }
 
 function MemberWealthCard({ member }: { member: FamilyMemberCardData }) {
-
   return (
     <View
       className="rounded-3xl p-4"
@@ -732,15 +509,12 @@ function useFamilyMembersAnalytics() {
         };
       });
 
-      const buildTrendPoints = (accountType?: Exclude<AssetTrendType, '总趋势'>) => trendMonths.map((month) => {
+      const trendPoints = trendMonths.map((month) => {
         const totalsByMember: Record<number, number> = {};
 
         for (const member of familyMembers) {
           let totalForMember = 0;
-          const memberAccounts = accounts.filter((account) => (
-            account.member_id === member.id
-            && (!accountType || account.account_type === accountType)
-          ));
+          const memberAccounts = accounts.filter((account) => account.member_id === member.id);
 
           for (const account of memberAccounts) {
             totalForMember += getValueAtDate(snapshotsByAccount.get(account.id) ?? [], month.dateText);
@@ -754,15 +528,11 @@ function useFamilyMembersAnalytics() {
           totalsByMember,
         } satisfies TrendPoint;
       });
-      const trendChartSections = TREND_CHART_CONFIG.map((chart) => ({
-        ...chart,
-        trendPoints: chart.key === '总趋势' ? buildTrendPoints() : buildTrendPoints(chart.key),
-      }));
 
       setData({
         totalAssets,
         memberCards,
-        trendChartSections,
+        trendPoints,
       });
     } catch (fetchError) {
       const message = fetchError instanceof Error ? fetchError.message : '加载失败';
@@ -786,19 +556,26 @@ function useFamilyMembersAnalytics() {
 }
 
 export default function FamilyMembersScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { data, isLoading, error } = useFamilyMembersAnalytics();
 
   return (
     <ScreenWrapper className="bg-app-bg">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
         <View
-          className="px-5 pb-3"
-          style={{ paddingTop: 16 }}
+          className="px-5 pb-3 flex-row items-center justify-between"
+          style={{ paddingTop: 48 }}
         >
-          <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text.primary }}>成员资产</Text>
-          <Text style={{ fontSize: 13, color: Colors.text.secondary, marginTop: 4 }}>
-            查看家庭成员资产占比与趋势
-          </Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="w-10 h-10 rounded-full items-center justify-center"
+            style={{ backgroundColor: Colors.surface }}
+          >
+            <MaterialCommunityIcons name="chevron-left" size={22} color={Colors.text.secondary} />
+          </TouchableOpacity>
+          <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text.primary }}>家庭成员</Text>
+          <View style={{ width: 40 }} />
         </View>
 
         {isLoading ? (

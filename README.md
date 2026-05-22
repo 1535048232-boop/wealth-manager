@@ -46,6 +46,7 @@
 附加说明：
 
 - iOS 发布说明见 `docs/ios-release.md`
+- iOS 发布时，**优先看 `docs/ios-release.md` 里的“已验证上传路径（2026-05-03）”**；该文档已经补充了 `eas submit` 失败时切换到 `altool` / Transporter 的回退方案
 - 本地配置自检命令：`npm run check:local-config -- <scenario>`
 
 建议初始化步骤：
@@ -124,6 +125,12 @@ cp .env.release.local.example .env.release.local
 这个文件仅保存在本机，不提交到 GitHub，用来记录 iOS 提审时会用到的本地信息。
 
 完整发布步骤见 `docs/ios-release.md`。
+
+补充提醒：
+
+- `eas build --platform ios --profile production` 是当前项目已验证可用的生产构建路径
+- `eas submit` 在本项目里曾出现过“submission 创建成功但最终 `ERRORED` 且无明确错误”的情况
+- 如果再次遇到这种情况，直接按 `docs/ios-release.md` 中记录的 `altool` / Transporter 回退方案处理，不要在同一条 EAS submit 链路上反复重试
 
 ### 3. 启动开发服务器
 
@@ -206,6 +213,13 @@ npx supabase db push              # 推送数据库变更
 npx supabase gen types typescript --local > types/supabase.ts  # 生成类型
 npx supabase functions deploy send-family-invitation            # 部署邀请提醒函数
 ```
+
+## Web 回归基线
+
+- 回归说明：`docs/test-baseline.md`
+- 脚本目录：`qa/`
+- 结果目录：`qa/artifacts/`
+- 一键执行：`npm run qa:baseline`
 
 ## 新人上手流程
 

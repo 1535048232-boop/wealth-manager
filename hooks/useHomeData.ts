@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { buildTrendPeriods, getValueAtDate, type TrendGranularity } from '@/lib/trendTime';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -33,7 +34,7 @@ export interface HomeData {
   members: MemberSummary[];
   segments: AssetSegmentData[];
   quadrantSegments: AssetSegmentData[];
-  trendPoints: HomeTrendPoint[];
+  trendPoints: Record<TrendGranularity, HomeTrendPoint[]>;
 }
 
 interface SnapshotRow {
@@ -68,28 +69,6 @@ const QUADRANT_LABELS = ['A类保值', 'B类消费', 'C类投资', 'D类保障']
 // Types that are generally locked / non-disposable
 const LOCKED_TYPES = new Set(['公积金', '期权']);
 
-function getMonthEnd(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
-}
-
-function getMonthLabel(date: Date) {
-  return `${date.getMonth() + 1}月`;
-}
-
-function getValueAtDate(snapshots: SnapshotRow[], dateText: string) {
-  let lastAmount = 0;
-
-  for (const snapshot of snapshots) {
-    if (snapshot.snapshot_date <= dateText) {
-      lastAmount = Number(snapshot.amount);
-    } else {
-      break;
-    }
-  }
-
-  return lastAmount;
-}
-
 export function useHomeData() {
   const { user } = useAuthStore();
   const profileVersion = useAppStore((state) => state.profileVersion);
@@ -103,12 +82,8 @@ export function useHomeData() {
     try {
       const today = new Date();
       const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-      const trendStart = new Date(today.getFullYear(), today.getMonth() - 5, 1);
-      const trendStartText = trendStart
-        .toISOString()
-        .split('T')[0];
 
-      // Parallel: family members, asset accounts, recent snapshots
+      // Parallel: family members, asset accounts, snapshots
       const [membersRes, accountsRes, snapshotsRes] = await Promise.all([
         supabase
           .from('family_members')
@@ -121,7 +96,6 @@ export function useHomeData() {
         supabase
           .from('asset_daily_snapshots')
           .select('account_id, snapshot_date, amount')
-          .gte('snapshot_date', trendStartText)
           .order('snapshot_date', { ascending: true }),
       ]);
 
@@ -211,37 +185,60 @@ export function useHomeData() {
       }
       const monthGrowth = totalAssets - startTotal;
 
-      const trendMonths = Array.from({ length: 6 }, (_, index) => {
-        const date = new Date();
-        date.setMonth(date.getMonth() - (5 - index));
-        const pointDate = index === 5 ? new Date() : getMonthEnd(date);
-        return {
-          label: getMonthLabel(date),
-          dateText: pointDate.toISOString().split('T')[0],
-        };
-      });
+      const monthlyPeriods = buildTrendPeriods(
+        snapshots.map((snapshot) => snapshot.snapshot_date),
+        'month',
+      );
 
-      const trendPoints: HomeTrendPoint[] = trendMonths.map((month) => {
-        let totalAmount = 0;
-        const trendTypeAmounts: Record<string, number> = {};
-        const trendQuadrantAmounts: Record<string, number> = {};
+      const getYearlyBConsumptionTotal = (account: { id: number }, yearText: string) => {
+        const accountSnapshots = snapshotsByAccount.get(account.id) ?? [];
+        const yearMonths = monthlyPeriods.filter((period) => period.key.startsWith(`${yearText}-`));
 
-        for (const account of accounts) {
-          const amount = getValueAtDate(snapshotsByAccount.get(account.id) ?? [], month.dateText);
-          totalAmount += amount;
-          trendTypeAmounts[account.account_type] = (trendTypeAmounts[account.account_type] ?? 0) + amount;
-          if (account.asset_quadrant) {
-            trendQuadrantAmounts[account.asset_quadrant] = (trendQuadrantAmounts[account.asset_quadrant] ?? 0) + amount;
+        return yearMonths.reduce(
+          (sum, period) => sum + getValueAtDate(accountSnapshots, period.dateText),
+          0,
+        );
+      };
+
+      const buildTrendPointsForGranularity = (granularity: TrendGranularity): HomeTrendPoint[] => {
+        const periods = granularity === 'month'
+          ? monthlyPeriods
+          : buildTrendPeriods(
+              snapshots.map((snapshot) => snapshot.snapshot_date),
+              'year',
+            );
+
+        return periods.map((period) => {
+          let totalAmount = 0;
+          const trendTypeAmounts: Record<string, number> = {};
+          const trendQuadrantAmounts: Record<string, number> = {};
+
+          for (const account of accounts) {
+            const amount = getValueAtDate(snapshotsByAccount.get(account.id) ?? [], period.dateText);
+            totalAmount += amount;
+            trendTypeAmounts[account.account_type] = (trendTypeAmounts[account.account_type] ?? 0) + amount;
+            if (account.asset_quadrant) {
+              const quadrantAmount = granularity === 'year' && account.asset_quadrant === 'B类消费'
+                ? getYearlyBConsumptionTotal(account, period.key)
+                : amount;
+
+              trendQuadrantAmounts[account.asset_quadrant] = (trendQuadrantAmounts[account.asset_quadrant] ?? 0) + quadrantAmount;
+            }
           }
-        }
 
-        return {
-          label: month.label,
-          totalAmount,
-          typeAmounts: trendTypeAmounts,
-          quadrantAmounts: trendQuadrantAmounts,
-        };
-      });
+          return {
+            label: period.label,
+            totalAmount,
+            typeAmounts: trendTypeAmounts,
+            quadrantAmounts: trendQuadrantAmounts,
+          };
+        });
+      };
+
+      const trendPoints: Record<TrendGranularity, HomeTrendPoint[]> = {
+        month: buildTrendPointsForGranularity('month'),
+        year: buildTrendPointsForGranularity('year'),
+      };
 
       // Disposable
       const disposableAmount = totalAssets - lockedAmount;
